@@ -230,7 +230,10 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
                 return null;
             } else {
                 const lastWord = curLineStrMatch.substring(0, curLineStrMatch.length - 1).split(' ').last();
-                if (lastWord.length <= 3 && lastWord !== lastWord.toUpperCase()) { return null }
+                if (cursorChar === ` `) {
+                    if (lastWord.length <= 2) { return null }
+                    if (lastWord.length === 3 && lastWord !== lastWord.toUpperCase()) { return null } //For capitalized acronyms
+                }
 
                 /* TESTING FUZZY MATCHING
                 const prepQuery = prepareQuery('testing this');
