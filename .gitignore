@@ -19,5 +19,5 @@ main.js
 # obsidian
 data.json
 
-# esbuild
-esbuild.config.mjs
+# dev esbuild
+dev-esbuild.config.mjs
