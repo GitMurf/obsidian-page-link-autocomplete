@@ -229,7 +229,22 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
             if (continueProcessing === false) {
                 return null;
             } else {
-                const lastWord = curLineStrMatch.substring(0, curLineStrMatch.length - 1).split(' ').last();
+                let lastWord;
+                let charsBack = 1;
+                const cursorTwoChar = curLineStrMatch.substring(curLineStrMatch.length - 2);
+                if (cursorTwoChar === `;;` || cursorTwoChar === `${this.thisPlugin.triggerChar}${this.thisPlugin.triggerChar}`) {
+                    charsBack = 2;
+                    const splitWords = curLineStrMatch.substring(0, curLineStrMatch.length - 2).split(' ');
+                    const numWords = splitWords.length;
+                    if (numWords <= 1) {
+                        lastWord = splitWords[0];
+                    } else {
+                        lastWord = `${splitWords[numWords - 2]} ${splitWords[numWords - 1]}`;
+                    }
+                } else {
+                    lastWord = curLineStrMatch.substring(0, curLineStrMatch.length - 1).split(' ').last();
+                }
+
                 if (cursorChar === ` `) {
                     if (lastWord.length <= 2) { return null }
                     if (lastWord.length === 3 && lastWord !== lastWord.toUpperCase()) { return null } //For capitalized acronyms
@@ -244,13 +259,13 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
 
                 if (cursorChar === `;`) {
                     return {
-                        start: { line: cursor.line, ch: curLineStrMatch.length - 1 - lastWord.length },
+                        start: { line: cursor.line, ch: curLineStrMatch.length - charsBack - lastWord.length },
                         end: { line: cursor.line, ch: curLineStrMatch.length },
                         query: lastWord
                     };
                 } else {
                     return {
-                        start: { line: cursor.line, ch: curLineStrMatch.length - 1 - lastWord.length },
+                        start: { line: cursor.line, ch: curLineStrMatch.length - charsBack - lastWord.length },
                         end: { line: cursor.line, ch: curLineStrMatch.length - 1 },
                         query: lastWord
                     };
