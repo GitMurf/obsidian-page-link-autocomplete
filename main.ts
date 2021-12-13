@@ -232,7 +232,7 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
                 if (this.thisPlugin.shiftSpace !== false) { continueProcessing = true }
             } else {
                 if (cursorTwoChar === `;,`) { semiAll = true }
-                if (cursorTwoChar === `${this.thisPlugin.triggerChar},`){spaceAll = true}
+                if (cursorTwoChar === `${this.thisPlugin.triggerChar},`) { spaceAll = true }
                 if (cursorChar === this.thisPlugin.triggerChar || cursorChar === `;` || semiAll || spaceAll) { continueProcessing = true }
             }
 
@@ -329,7 +329,7 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
         }
 
         let matchingItems = allLinks.filter(eachLink => eachLink.toLowerCase().contains(queryText.toLowerCase()));
-        let finalItems: string[] = Array.from(new Set(matchingItems)).sort(function(a, b){return a.length - b.length});
+        let finalItems: string[] = Array.from(new Set(matchingItems)).sort(function (a, b) { return a.length - b.length });
         if (allLinks.length > 0) { return finalItems } else { return null }
     }
 
