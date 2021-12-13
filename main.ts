@@ -22,6 +22,12 @@ export default class MyPlugin extends Plugin {
     useEventListener: boolean = false;
     shiftSpace: boolean = false;
     modRoot: HTMLDivElement = null;
+    curMdCacheLinks: LinkCache[];
+    fileLinks: string[];
+    curYaml: FrontMatterCache;
+    yamlLinks: string[];
+    vaultLinks: string[];
+    linkMode: string;
 
     async onload() {
         console.log("loading plugin: " + pluginName);
@@ -42,10 +48,55 @@ export default class MyPlugin extends Plugin {
 
         // This adds a settings tab so the user can configure various aspects of the plugin
         this.addSettingTab(new SampleSettingTab(this.app, this));
+
+        //When Obsidian initially fully loads
         this.app.workspace.onLayoutReady(this.onLayoutReady.bind(this));
+
+        //Primarily for switching between panes or opening a new file
+        this.registerEvent(this.app.workspace.on('file-open', this.onFileChange.bind(this)));
+
+        //Primarily for when switching between Edit and Preview mode
+        //this.registerEvent(this.app.workspace.on('layout-change', this.onLayoutChange.bind(this)));
+
+        //Metadatacache updates
+        this.registerEvent(
+            this.app.metadataCache.on('resolve', (file) => {
+                if (this.app.workspace.layoutReady) {
+                    //console.log('onMetaChange()');
+                    if (this.app.workspace.getActiveFile() != file || this.app.workspace.getActiveFile() === null) return;
+                    //console.time('onMetaChange');
+                    const mdCache = this.app.metadataCache.getFileCache(file);
+                    if (mdCache) {
+                        if (mdCache.links) {
+                            //Ignoring the check for now because it only takes .1 ms to run so may as well run each time md cache updates
+                            //console.time('onMetaChange - AllLinks');
+                            this.fileLinks = getLinksFromFile(this, file, mdCache.links);
+                            //console.timeEnd('onMetaChange - AllLinks');
+
+                            //Here is the old code when I was checking to have run less often (unnecessary though)
+                            /*
+                            if (this.curMdCacheLinks.length !== mdCache.links.length) {
+                                this.fileLinks = getLinksFromFile(this, file, mdCache.links);
+                            }
+                            */
+                        }
+                        if (mdCache.frontmatter) {
+                            if (JSON.stringify(this.curYaml) !== JSON.stringify(mdCache.frontmatter)) {
+                                //console.time('onMetaChange - frontmatter');
+                                this.yamlLinks = findLinksRelatedYamlKeyValue(this, file, mdCache.frontmatter);
+                                //console.timeEnd('onMetaChange - frontmatter');
+                            }
+                        }
+                    }
+                    //console.timeEnd('onMetaChange');
+                }
+            })
+        );
     }
 
     onLayoutReady(): void {
+        //console.log('onLayoutReady()');
+        //console.time('onLayoutReady');
         if (this.useEventListener) {
             if (document.querySelector("body")) {
                 if (this.modRoot === null) { setupEventListeners(this); }
@@ -57,6 +108,32 @@ export default class MyPlugin extends Plugin {
                 }, 5000);
             }
         }
+        const actFile = this.app.workspace.getActiveFile();
+        if (actFile) {
+            const mdCache = this.app.metadataCache.getFileCache(actFile);
+            this.fileLinks = getLinksFromFile(this, actFile, mdCache.links);
+            this.yamlLinks = findLinksRelatedYamlKeyValue(this, actFile, mdCache.frontmatter);
+            this.vaultLinks = getAllVaultLinks(this);
+        }
+        //console.timeEnd('onLayoutReady');
+    }
+
+    async onFileChange() {
+        this.fileLinks = [];
+        this.yamlLinks = [];
+        this.vaultLinks = [];
+        //console.log('onFileChange()');
+        //console.time('onFileChange');
+        if (this.app.workspace.layoutReady) {
+            const actFile = this.app.workspace.getActiveFile();
+            if (actFile) {
+                const mdCache = this.app.metadataCache.getFileCache(actFile);
+                this.fileLinks = getLinksFromFile(this, actFile, mdCache.links);
+                this.yamlLinks = findLinksRelatedYamlKeyValue(this, actFile, mdCache.frontmatter);
+                this.vaultLinks = getAllVaultLinks(this);
+            }
+        }
+        //console.timeEnd('onFileChange');
     }
 
     onunload() {
@@ -122,49 +199,199 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
         super(app);
     }
 
-    addlink(linkArr: string[], myLink: string) {
-        if (!linkArr) {
-            return true;
+    onTrigger(cursor: EditorPosition, editor: Editor, file: TFile): EditorSuggestTriggerInfo | null {
+        if (cursor.ch === 0) {
+            // at beginning of line so exit
+            //console.log('beg of line. Enter key may have been pressed.');
+            return null;
         } else {
-            if (!linkArr.includes(myLink)) { return true } else { return false }
-        }
-    }
+            this.thisPlugin.linkMode = 'yaml';
+            const curLineStr = editor.getLine(cursor.line);
+            const curLineStrMatch = curLineStr.substring(0, cursor.ch);
+            const cursorChar = curLineStrMatch.substring(curLineStrMatch.length - 1);
+            const cursorTwoChar = curLineStrMatch.substring(curLineStrMatch.length - 2);
 
-    getLinksFromFile(myFile: TFile): string[] {
-        //console.log('getLinksFromFile');
-        const mdCache = this.thisPlugin.app.metadataCache.getFileCache(myFile);
-        let allLinks: LinkCache[];
-        if (mdCache) {
-            allLinks = mdCache.links;
-        }
-        if (allLinks) {
-            let myLinks: string[] = [];
-            allLinks.forEach(eachLink => {
-                if (eachLink.displayText) {
-                    if (eachLink.displayText === eachLink.link) {
-                        if (this.addlink(myLinks, eachLink.link)) { myLinks.push(eachLink.link) }
+            let semiAll = false;
+            let spaceAll = false;
+            let continueProcessing: boolean = false;
+            if (this.thisPlugin.useEventListener) {
+                if (this.thisPlugin.shiftSpace !== false) { continueProcessing = true }
+            } else {
+                if (cursorTwoChar === `;,`) { semiAll = true }
+                if (cursorTwoChar === `${this.thisPlugin.triggerChar},`){spaceAll = true}
+                if (cursorChar === this.thisPlugin.triggerChar || cursorChar === `;` || semiAll || spaceAll) { continueProcessing = true }
+            }
+
+            if (continueProcessing === false) {
+                return null;
+            } else {
+                let lastWord;
+                let charsBack = 1;
+                if (cursorTwoChar === `;;` || cursorTwoChar === `${this.thisPlugin.triggerChar}${this.thisPlugin.triggerChar}` || semiAll || spaceAll) {
+                    charsBack = 2;
+                    const splitWords = curLineStrMatch.substring(0, curLineStrMatch.length - 2).split(' ');
+                    if (semiAll || spaceAll) {
+                        lastWord = splitWords.last();
                     } else {
-                        if (this.addlink(myLinks, eachLink.link)) { myLinks.push(eachLink.link) }
-                        const aliasLink = `${eachLink.link}|${eachLink.displayText}`;
-                        if (this.addlink(myLinks, aliasLink)) { myLinks.push(aliasLink) }
+                        const numWords = splitWords.length;
+                        if (numWords <= 1) {
+                            lastWord = splitWords[0];
+                        } else {
+                            lastWord = `${splitWords[numWords - 2]} ${splitWords[numWords - 1]}`;
+                        }
                     }
                 } else {
-                    if (this.addlink(myLinks, eachLink.link)) { myLinks.push(eachLink.link) }
+                    lastWord = curLineStrMatch.substring(0, curLineStrMatch.length - 1).split(' ').last();
                 }
-            })
-            return myLinks;
-        } else {
-            return [];
+
+                if (cursorChar === ` `) {
+                    if (lastWord.length <= 2) { return null }
+                    if (lastWord.length === 3 && lastWord !== lastWord.toUpperCase()) { return null } //For capitalized acronyms
+                }
+
+                /* TESTING FUZZY MATCHING
+                const prepQuery = prepareQuery('testing this');
+                console.log(prepQuery);
+                const prepFuzzySearch = prepareFuzzySearch("testing more");
+                console.log(prepFuzzySearch);
+                */
+
+                if (cursorChar === `;`) {
+                    return {
+                        start: { line: cursor.line, ch: curLineStrMatch.length - charsBack - lastWord.length },
+                        end: { line: cursor.line, ch: curLineStrMatch.length },
+                        query: lastWord
+                    };
+                } else if (semiAll) {
+                    this.thisPlugin.linkMode = 'all-semi';
+                    return {
+                        start: { line: cursor.line, ch: curLineStrMatch.length - charsBack - lastWord.length },
+                        end: { line: cursor.line, ch: curLineStrMatch.length },
+                        query: lastWord
+                    };
+                } else if (spaceAll) {
+                    this.thisPlugin.linkMode = 'all';
+                    return {
+                        start: { line: cursor.line, ch: curLineStrMatch.length - charsBack - lastWord.length },
+                        end: { line: cursor.line, ch: curLineStrMatch.length },
+                        query: lastWord
+                    };
+                } else {
+                    return {
+                        start: { line: cursor.line, ch: curLineStrMatch.length - charsBack - lastWord.length },
+                        end: { line: cursor.line, ch: curLineStrMatch.length - 1 },
+                        query: lastWord
+                    };
+                }
+            }
         }
     }
 
-    findLinksRelatedYamlKeyValue(myFile: TFile, mdYaml: FrontMatterCache): string[] {
-        //console.log('findLinksRelatedYamlKeyValue');
-        const allFiles = this.thisPlugin.app.vault.getMarkdownFiles();
+    getSuggestions(context: EditorSuggestContext): string[] | Promise<string[]> {
+        const queryText = context.query;
+        /*
+        console.log(context);
+        console.log(context.query);
+        console.log(queryText);
+        */
+        let allLinks: string[];
+        switch (this.thisPlugin.linkMode) {
+            case 'yaml':
+                allLinks = this.thisPlugin.fileLinks;
+                allLinks.push(...this.thisPlugin.yamlLinks);
+                break;
+            case 'all':
+                allLinks = this.thisPlugin.fileLinks;
+                allLinks.push(...this.thisPlugin.yamlLinks);
+                allLinks.push(...this.thisPlugin.vaultLinks);
+                break;
+            case 'all-semi':
+                allLinks = this.thisPlugin.fileLinks;
+                allLinks.push(...this.thisPlugin.yamlLinks);
+                allLinks.push(...this.thisPlugin.vaultLinks);
+                break;
+            default:
+                allLinks = this.thisPlugin.fileLinks;
+        }
+
+        let matchingItems = allLinks.filter(eachLink => eachLink.toLowerCase().contains(queryText.toLowerCase()));
+        let finalItems: string[] = Array.from(new Set(matchingItems)).sort(function(a, b){return a.length - b.length});
+        if (allLinks.length > 0) { return finalItems } else { return null }
+    }
+
+    renderSuggestion(value: string, el: HTMLElement) {
+        const aliasSplit = value.split('|');
+        aliasSplit.length > 1 ? el.setText(aliasSplit[1]) : el.setText(value);
+    }
+
+    selectSuggestion(value: string, event: MouseEvent | KeyboardEvent) {
+        const editor = this.context.editor;
+        let newLink = `[[${value}]]`;
+        if (this.thisPlugin.linkMode === 'all') {
+            newLink = `[[${value}]] `;
+        }
+        editor.replaceRange(newLink, this.context.start, this.context.end);
+        //editor.setSelection({ line: cursor.line, ch: lastWordCh + newLink.length });
+    }
+}
+
+function addlink(linkArr: string[], myLink: string): boolean {
+    if (!linkArr) {
+        return true;
+    } else {
+        if (!linkArr.includes(myLink)) { return true } else { return false }
+    }
+}
+
+function getLinksFromFile(thisPlugin: MyPlugin, myFile: TFile, allLinks: LinkCache[] = null): string[] {
+    //console.log('getLinksFromFile');
+    if (!allLinks) {
+        const mdCache = thisPlugin.app.metadataCache.getFileCache(myFile);
+        if (mdCache) {
+            if (mdCache.links) {
+                allLinks = mdCache.links;
+            }
+        }
+    }
+    thisPlugin.curMdCacheLinks = allLinks;
+    if (allLinks) {
+        let myLinks: string[] = [];
+        allLinks.forEach(eachLink => {
+            if (eachLink.displayText) {
+                if (eachLink.displayText === eachLink.link) {
+                    if (addlink(myLinks, eachLink.link)) { myLinks.push(eachLink.link) }
+                } else {
+                    if (addlink(myLinks, eachLink.link)) { myLinks.push(eachLink.link) }
+                    const aliasLink = `${eachLink.link}|${eachLink.displayText}`;
+                    if (addlink(myLinks, aliasLink)) { myLinks.push(aliasLink) }
+                }
+            } else {
+                if (addlink(myLinks, eachLink.link)) { myLinks.push(eachLink.link) }
+            }
+        })
+        return myLinks;
+    } else {
+        return [];
+    }
+}
+
+function findLinksRelatedYamlKeyValue(thisPlugin: MyPlugin, myFile: TFile, mdYaml: FrontMatterCache = null): string[] {
+    //console.log('findLinksRelatedYamlKeyValue');
+    if (!mdYaml) {
+        const mdCache = thisPlugin.app.metadataCache.getFileCache(myFile);
+        if (mdCache) {
+            if (mdCache.frontmatter) {
+                mdYaml = mdCache.frontmatter;
+            }
+        }
+    }
+    thisPlugin.curYaml = mdYaml;
+    if (mdYaml) {
+        const allFiles = thisPlugin.app.vault.getMarkdownFiles();
         let yamlFiles: { theFile: TFile, mdCache: CachedMetadata }[] = [];
         allFiles.forEach(eachFile => {
             if (eachFile != myFile) {
-                const eachCache = this.thisPlugin.app.metadataCache.getFileCache(eachFile);
+                const eachCache = thisPlugin.app.metadataCache.getFileCache(eachFile);
                 let eachYaml = eachCache ? eachCache.frontmatter : null;
                 if (eachYaml) {
                     yamlFiles.push({ theFile: eachFile, mdCache: eachCache });
@@ -191,7 +418,7 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
                                 if (Array.isArray(valuesArr)) {
                                     valuesArr.forEach(eachValue => {
                                         if (eachValue.toString().toLowerCase() === eachVal.toString().toLowerCase()) {
-                                            if (this.addlink(myLinks, eachFileYaml.theFile.basename)) { myLinks.push(eachFileYaml.theFile.basename) }
+                                            if (addlink(myLinks, eachFileYaml.theFile.basename)) { myLinks.push(eachFileYaml.theFile.basename) }
                                             fileMatch = true;
                                         }
                                     });
@@ -202,116 +429,29 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
                 }
             });
             if (fileMatch) {
-                let myNewLinks: string[] = this.getLinksFromFile(eachFileYaml.theFile);
+                let myNewLinks: string[] = getLinksFromFile(thisPlugin, eachFileYaml.theFile, eachFileYaml.mdCache.links);
                 myLinks.push(...myNewLinks);
             }
         });
         return myLinks;
+    } else {
+        return []
     }
+}
 
-    onTrigger(cursor: EditorPosition, editor: Editor, file: TFile): EditorSuggestTriggerInfo | null {
-        if (cursor.ch === 0) {
-            // at beginning of line so exit
-            //console.log('beg of line. Enter key may have been pressed.');
-            return null;
-        } else {
-            const curLineStr = editor.getLine(cursor.line);
-            const curLineStrMatch = curLineStr.substring(0, cursor.ch);
-            const cursorChar = curLineStrMatch.substring(curLineStrMatch.length - 1);
-
-            let continueProcessing: boolean = false;
-            if (this.thisPlugin.useEventListener) {
-                if (this.thisPlugin.shiftSpace !== false) { continueProcessing = true }
-            } else {
-                if (cursorChar === this.thisPlugin.triggerChar || cursorChar === `;`) { continueProcessing = true }
-            }
-
-            if (continueProcessing === false) {
-                return null;
-            } else {
-                let lastWord;
-                let charsBack = 1;
-                const cursorTwoChar = curLineStrMatch.substring(curLineStrMatch.length - 2);
-                if (cursorTwoChar === `;;` || cursorTwoChar === `${this.thisPlugin.triggerChar}${this.thisPlugin.triggerChar}`) {
-                    charsBack = 2;
-                    const splitWords = curLineStrMatch.substring(0, curLineStrMatch.length - 2).split(' ');
-                    const numWords = splitWords.length;
-                    if (numWords <= 1) {
-                        lastWord = splitWords[0];
-                    } else {
-                        lastWord = `${splitWords[numWords - 2]} ${splitWords[numWords - 1]}`;
-                    }
-                } else {
-                    lastWord = curLineStrMatch.substring(0, curLineStrMatch.length - 1).split(' ').last();
-                }
-
-                if (cursorChar === ` `) {
-                    if (lastWord.length <= 2) { return null }
-                    if (lastWord.length === 3 && lastWord !== lastWord.toUpperCase()) { return null } //For capitalized acronyms
-                }
-
-                /* TESTING FUZZY MATCHING
-                const prepQuery = prepareQuery('testing this');
-                console.log(prepQuery);
-                const prepFuzzySearch = prepareFuzzySearch("testing more");
-                console.log(prepFuzzySearch);
-                */
-
-                if (cursorChar === `;`) {
-                    return {
-                        start: { line: cursor.line, ch: curLineStrMatch.length - charsBack - lastWord.length },
-                        end: { line: cursor.line, ch: curLineStrMatch.length },
-                        query: lastWord
-                    };
-                } else {
-                    return {
-                        start: { line: cursor.line, ch: curLineStrMatch.length - charsBack - lastWord.length },
-                        end: { line: cursor.line, ch: curLineStrMatch.length - 1 },
-                        query: lastWord
-                    };
-                }
-            }
-        }
-    }
-
-    getSuggestions(context: EditorSuggestContext): string[] | Promise<string[]> {
-        const queryText = context.query;
-        /*
-        console.log(context);
-        console.log(context.query);
-        console.log(queryText);
-        */
-        let allLinks: string[] = [];
-        let myLinks: string[] = this.getLinksFromFile(context.file);
-        allLinks.push(...myLinks);
-
-        const mdCache: CachedMetadata = this.thisPlugin.app.metadataCache.getFileCache(context.file);
-        let mdYaml: FrontMatterCache;
-        if (mdCache) {
-            mdYaml = mdCache.frontmatter;
-        }
-        if (mdYaml) {
-            myLinks = this.findLinksRelatedYamlKeyValue(context.file, mdYaml);
-            allLinks.push(...myLinks);
-        }
-
-        let matchingItems = allLinks.filter(eachLink => eachLink.toLowerCase().contains(queryText.toLowerCase()));
-        let finalItems: string[] = [];
-        matchingItems.forEach(eachItem => {
-            if (this.addlink(finalItems, eachItem)) { finalItems.push(eachItem) }
-        })
-        if (allLinks.length > 0) { return finalItems } else { return null }
-    }
-
-    renderSuggestion(value: string, el: HTMLElement) {
-        const aliasSplit = value.split('|');
-        aliasSplit.length > 1 ? el.setText(aliasSplit[1]) : el.setText(value);
-    }
-
-    selectSuggestion(value: string, event: MouseEvent | KeyboardEvent) {
-        const editor = this.context.editor;
-        const newLink = `[[${value}]]`;
-        editor.replaceRange(newLink, this.context.start, this.context.end);
-        //editor.setSelection({ line: cursor.line, ch: lastWordCh + newLink.length });
-    }
+function getAllVaultLinks(thisPlugin: MyPlugin): string[] {
+    //console.time('getAllVaultLinks()');
+    const files = thisPlugin.app.vault.getMarkdownFiles();
+    let links: string[] = [];
+    files.forEach((file: TFile) => {
+        links.push(file.basename);
+    });
+    const unResLinks = Object.values(Object.fromEntries(Object.entries(thisPlugin.app.metadataCache.unresolvedLinks)));
+    unResLinks.forEach((eachItem) => {
+        let theValues = Object.keys(eachItem);
+        if (theValues.length > 0) { links.push(...theValues) }
+    });
+    let uniq: string[] = Array.from(new Set(links));
+    //console.timeEnd('getAllVaultLinks()');
+    return uniq
 }
