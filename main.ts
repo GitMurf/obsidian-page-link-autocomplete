@@ -205,8 +205,22 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
             //console.log('beg of line. Enter key may have been pressed.');
             return null;
         } else {
+            if (this.context) { console.log(this.context); }
+            let nldActive = false;
+            let nldSuggest = false;
+            let nldTrigger;
+            let nld = (<any>this.thisPlugin.app).plugins.getPlugin('nldates-obsidian');
+            if (nld) {
+                nldActive = true;
+                nldSuggest = nld.settings.isAutosuggestEnabled;
+                nldTrigger = nld.settings.autocompleteTriggerPhrase;
+            }
             this.thisPlugin.linkMode = 'yaml';
             const curLineStr = editor.getLine(cursor.line);
+            if (nldActive && nldSuggest) {
+                //This is to avoid interfering with the natural language dates plugin trigger which I am using ",," for
+                if (curLineStr.indexOf(nldTrigger) > -1) { return null }
+            }
             const curLineStrMatch = curLineStr.substring(0, cursor.ch);
             const cursorChar = curLineStrMatch.substring(curLineStrMatch.length - 1);
             const cursorTwoChar = curLineStrMatch.substring(curLineStrMatch.length - 2);
