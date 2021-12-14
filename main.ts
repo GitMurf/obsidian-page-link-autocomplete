@@ -253,7 +253,7 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
                 let endRange: EditorPosition;
                 switch (this.thisPlugin.trigCharMatch) {
                     case this.thisPlugin.triggerCharSecondary:
-                        console.log(`${pluginName}: MISSING logic for this item No1`)
+                        //Don't need to do anything special here
                         break;
                     case `${this.thisPlugin.triggerCharSecondary}${this.thisPlugin.triggerCharAllLinks}`:
                         startRange = { line: cursor.line, ch: cursor.ch - 3 + myOffset };
@@ -263,7 +263,7 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
                         }
                         break;
                     case `${this.thisPlugin.triggerChar}`:
-                        console.log(`${pluginName}: MISSING logic for this item No2`)
+                        //Don't need to do anything special here
                         break;
                     case `${this.thisPlugin.triggerChar}${this.thisPlugin.triggerCharAllLinks}`:
                         startRange = { line: cursor.line, ch: cursor.ch - 2 + myOffset };
@@ -278,7 +278,10 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
                 const curCursor = editor.getCursor();
                 const curLineStr = editor.getLine(curCursor.line);
                 const newQuery = curLineStr.substring(this.context.start.ch, curCursor.ch);
-                if (newQuery.length < 4) { return null }
+                if (newQuery.length < 4) {
+                    this.thisPlugin.linkMatches = 0;
+                    return null
+                }
                 return {
                     start: { line: this.context.start.line, ch: this.context.start.ch },
                     end: { line: curCursor.line, ch: curCursor.ch - myOffset },
@@ -290,7 +293,10 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
                 const curLineStr = editor.getLine(cursor.line);
                 if (nldActive && nldSuggest) {
                     //This is to avoid interfering with the natural language dates plugin trigger which I am using ",," for
-                    if (curLineStr.indexOf(nldTrigger) > -1) { return null }
+                    if (curLineStr.indexOf(nldTrigger) > -1) {
+                        this.thisPlugin.linkMatches = 0;
+                        return null;
+                    }
                 }
                 const curLineStrMatch = curLineStr.substring(0, cursor.ch);
                 const cursorChar = curLineStrMatch.substring(curLineStrMatch.length - 1);
@@ -308,6 +314,7 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
                 }
 
                 if (continueProcessing === false) {
+                    this.thisPlugin.linkMatches = 0;
                     return null;
                 } else {
                     let lastWord;
@@ -329,10 +336,19 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
                         lastWord = curLineStrMatch.substring(0, curLineStrMatch.length - 1).split(' ').last();
                     }
 
-                    if (lastWord.trim() === "") { return null }
+                    if (lastWord.trim() === "") {
+                        this.thisPlugin.linkMatches = 0;
+                        return null;
+                    }
                     if (cursorChar === this.thisPlugin.triggerChar || cursorChar === this.thisPlugin.triggerCharAllLinks) {
-                        if (lastWord.length <= 2) { return null }
-                        if (lastWord.length === 3 && lastWord !== lastWord.toUpperCase()) { return null } //For capitalized acronyms
+                        if (lastWord.length <= 2) {
+                            this.thisPlugin.linkMatches = 0;
+                            return null;
+                        }
+                        if (lastWord.length === 3 && lastWord !== lastWord.toUpperCase()) {
+                            this.thisPlugin.linkMatches = 0;
+                            return null;
+                        } //For capitalized acronyms
                     }
 
                     /* TESTING FUZZY MATCHING
