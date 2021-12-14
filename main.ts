@@ -385,7 +385,7 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
                         this.thisPlugin.trigCharMatch = `${this.thisPlugin.triggerChar}`;
                         return {
                             start: { line: cursor.line, ch: curLineStrMatch.length - charsBack - lastWord.length },
-                            end: { line: cursor.line, ch: curLineStrMatch.length - 1 },
+                            end: { line: cursor.line, ch: curLineStrMatch.length },
                             query: lastWord
                         };
                     }
@@ -445,7 +445,7 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
     selectSuggestion(value: string, event: MouseEvent | KeyboardEvent) {
         const editor = this.context.editor;
         let newLink = `[[${value}]]`;
-        if (this.thisPlugin.linkMode === 'all') {
+        if (this.thisPlugin.triggerChar === ' ' && (this.thisPlugin.trigCharMatch === `${this.thisPlugin.triggerChar}` || this.thisPlugin.trigCharMatch === `${this.thisPlugin.triggerChar}${this.thisPlugin.triggerCharAllLinks}`)) {
             newLink = `[[${value}]] `;
         }
         editor.replaceRange(newLink, this.context.start, this.context.end);
