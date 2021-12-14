@@ -9,11 +9,13 @@ const pluginName = 'Page Link Autocomplete';
 // Remember to rename these classes and interfaces!
 
 interface MyPluginSettings {
-    mySetting: string;
+    autoSpace: boolean;
+    secondaryTrigger: string;
 }
 
 const DEFAULT_SETTINGS: MyPluginSettings = {
-    mySetting: 'default'
+    autoSpace: false,
+    secondaryTrigger: ';'
 }
 
 export default class MyPlugin extends Plugin {
@@ -36,6 +38,14 @@ export default class MyPlugin extends Plugin {
     async onload() {
         console.log("loading plugin: " + pluginName);
         await this.loadSettings();
+
+        if (this.settings.autoSpace) {
+            this.triggerChar = ' ';
+        } else {
+            this.triggerChar = '!null!';
+        }
+        this.triggerCharSecondary = this.settings.secondaryTrigger;
+
         //Use event listener like Shift + Space since EditorSuggest can't look at modifier key
         //instead of just regular EditorSuggest looking at last entered character(s)
         this.useEventListener = false;
@@ -177,23 +187,42 @@ class SampleSettingTab extends PluginSettingTab {
     }
 
     display(): void {
-        const { containerEl } = this;
-
+        let { containerEl } = this;
         containerEl.empty();
-
-        containerEl.createEl('h2', { text: 'Settings for my awesome plugin.' });
+        containerEl.createEl('h2', { text: 'Page Link Autocomplete Settings' });
 
         new Setting(containerEl)
-            .setName('Setting #1')
-            .setDesc('It\'s a secret')
-            .addText(text => text
-                .setPlaceholder('Enter your secret')
-                .setValue(this.plugin.settings.mySetting)
+            .setName('Auto Suggest Links with Spacebar')
+            .setDesc('When enabled this plugin will suggest links after each word you type (if there is a match)')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.autoSpace)
                 .onChange(async (value) => {
-                    console.log('Secret: ' + value);
-                    this.plugin.settings.mySetting = value;
+                    this.plugin.settings.autoSpace = value;
+                    if (value === true) {
+                        this.plugin.triggerChar = ' ';
+                    } else {
+                        this.plugin.triggerChar = '!null!';
+                    }
                     await this.plugin.saveSettings();
                 }));
+
+        let thisElem = new Setting(containerEl)
+            .setName('Secondary Suggest Trigger')
+            .setDesc(createFragment((innerFrag) => {
+                innerFrag.createEl('span', { text: 'Character that manually triggers the suggester' });
+                innerFrag.createEl('br');
+                innerFrag.createEl('strong', { text: 'Note:' });
+                innerFrag.createEl('span', { text: ' This can be used in addition to (or in place of) the Spacebar option above' });
+            }))
+            .addText(text => text
+                .setPlaceholder(';')
+                .setValue(this.plugin.settings.secondaryTrigger)
+                .onChange(async (value) => {
+                    this.plugin.settings.secondaryTrigger = value;
+                    this.plugin.triggerCharSecondary = value;
+                    await this.plugin.saveSettings();
+                }));
+        thisElem.controlEl.querySelector('input').maxLength = 1;
     }
 }
 
