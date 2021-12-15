@@ -247,17 +247,6 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
             this.thisPlugin.linkMatches = 0;
             return null;
         } else {
-            //Check if Natural Language Dates (nld) plugin is enabled and if the auto complete suggester is present, skip
-            let nldActive = false;
-            let nldSuggest = false;
-            let nldTrigger;
-            let nld = (<any>this.thisPlugin.app).plugins.getPlugin('nldates-obsidian');
-            if (nld) {
-                nldActive = true;
-                nldSuggest = nld.settings.isAutosuggestEnabled;
-                nldTrigger = nld.settings.autocompleteTriggerPhrase;
-            }
-
             //If this.context has a value that means the page autocomplete suggester is currently open
             if (this.context && this.thisPlugin.linkMatches > 0) {
                 //This allows the user to filter down the list even more when typing further instead of making it disappear
@@ -317,6 +306,23 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
                     query: newQuery
                 };
             } else {
+                const cursorChar = editor.getRange({ line: cursor.line, ch: cursor.ch - 1 }, cursor)
+                if (cursorChar !== this.thisPlugin.triggerChar && cursorChar !== this.thisPlugin.triggerCharSecondary && cursorChar !== this.thisPlugin.triggerCharAllLinks) {
+                    this.thisPlugin.linkMatches = 0;
+                    return null;
+                }
+
+                //Check if Natural Language Dates (nld) plugin is enabled and if the auto complete suggester is present, skip
+                let nldActive = false;
+                let nldSuggest = false;
+                let nldTrigger;
+                let nld = (<any>this.thisPlugin.app).plugins.getPlugin('nldates-obsidian');
+                if (nld) {
+                    nldActive = true;
+                    nldSuggest = nld.settings.isAutosuggestEnabled;
+                    nldTrigger = nld.settings.autocompleteTriggerPhrase;
+                }
+
                 this.thisPlugin.linkMode = 'yaml';
                 this.thisPlugin.linkMatches = 0;
                 const curLineStr = editor.getLine(cursor.line);
@@ -328,7 +334,6 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
                     }
                 }
                 const curLineStrMatch = curLineStr.substring(0, cursor.ch);
-                const cursorChar = curLineStrMatch.substring(curLineStrMatch.length - 1);
                 const cursorTwoChar = curLineStrMatch.substring(curLineStrMatch.length - 2);
 
                 let semiAll = false;
