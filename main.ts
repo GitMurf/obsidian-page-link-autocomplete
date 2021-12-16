@@ -11,11 +11,13 @@ const pluginName = 'Page Link Autocomplete';
 interface MyPluginSettings {
     autoSpace: boolean;
     secondaryTrigger: string;
+    getAlias: boolean;
 }
 
 const DEFAULT_SETTINGS: MyPluginSettings = {
     autoSpace: false,
-    secondaryTrigger: ';'
+    secondaryTrigger: ';',
+    getAlias: true
 }
 
 export default class MyPlugin extends Plugin {
@@ -593,7 +595,7 @@ function findLinksRelatedYamlKeyValue(thisPlugin: MyPlugin, myFile: TFile, mdYam
 }
 
 function getAllVaultLinks(thisPlugin: MyPlugin): string[] {
-    //console.time('getAllVaultLinks()');
+    console.time('getAllVaultLinks()');
     const files = thisPlugin.app.vault.getMarkdownFiles();
     let links: string[] = [];
     files.forEach((file: TFile) => {
@@ -605,6 +607,6 @@ function getAllVaultLinks(thisPlugin: MyPlugin): string[] {
         if (theValues.length > 0) { links.push(...theValues) }
     });
     let uniq: string[] = Array.from(new Set(links));
-    //console.timeEnd('getAllVaultLinks()');
+    console.timeEnd('getAllVaultLinks()');
     return uniq
 }
