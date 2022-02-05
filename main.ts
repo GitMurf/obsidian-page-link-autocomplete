@@ -32,6 +32,7 @@ export default class MyPlugin extends Plugin {
     fileLinks: string[];
     curYaml: FrontMatterCache;
     yamlLinks: string[];
+    yamlKVPairs: Map<any, any>;
     vaultLinks: string[];
     linkMode: string;
     linkMatches: number;
@@ -99,7 +100,9 @@ export default class MyPlugin extends Plugin {
                         if (mdCache.frontmatter) {
                             if (JSON.stringify(this.curYaml) !== JSON.stringify(mdCache.frontmatter)) {
                                 //console.time('onMetaChange - frontmatter');
-                                this.yamlLinks = findLinksRelatedYamlKeyValue(this, file, mdCache.frontmatter);
+                                let theseResults = findLinksRelatedYamlKeyValue(this, file, mdCache.frontmatter);
+                                this.yamlLinks = theseResults.links;
+                                this.yamlKVPairs = theseResults.yamlKeyValues;
                                 //console.timeEnd('onMetaChange - frontmatter');
                             }
                         }
@@ -128,7 +131,9 @@ export default class MyPlugin extends Plugin {
         if (actFile) {
             const mdCache = this.app.metadataCache.getFileCache(actFile);
             this.fileLinks = getLinksFromFile(this, actFile, mdCache.links);
-            this.yamlLinks = findLinksRelatedYamlKeyValue(this, actFile, mdCache.frontmatter);
+            let theseResults = findLinksRelatedYamlKeyValue(this, actFile, mdCache.frontmatter);
+            this.yamlLinks = theseResults.links;
+            this.yamlKVPairs = theseResults.yamlKeyValues;
             this.vaultLinks = getAllVaultLinks(this);
         }
         //console.timeEnd('onLayoutReady');
@@ -137,6 +142,7 @@ export default class MyPlugin extends Plugin {
     async onFileChange() {
         this.fileLinks = [];
         this.yamlLinks = [];
+        this.yamlKVPairs = new Map();
         this.vaultLinks = [];
         //console.log('onFileChange()');
         //console.time('onFileChange');
@@ -145,7 +151,9 @@ export default class MyPlugin extends Plugin {
             if (actFile) {
                 const mdCache = this.app.metadataCache.getFileCache(actFile);
                 this.fileLinks = getLinksFromFile(this, actFile, mdCache.links);
-                this.yamlLinks = findLinksRelatedYamlKeyValue(this, actFile, mdCache.frontmatter);
+                let theseResults = findLinksRelatedYamlKeyValue(this, actFile, mdCache.frontmatter);
+                this.yamlLinks = theseResults.links;
+                this.yamlKVPairs = theseResults.yamlKeyValues;
                 this.vaultLinks = getAllVaultLinks(this);
             }
         }
@@ -249,181 +257,208 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
             this.thisPlugin.linkMatches = 0;
             return null;
         } else {
-            //If this.context has a value that means the page autocomplete suggester is currently open
-            if (this.context && this.thisPlugin.linkMatches > 0) {
-                //This allows the user to filter down the list even more when typing further instead of making it disappear
-                //console.log(this.context);
+            const cursorChar1 = editor.getRange({ line: cursor.line, ch: cursor.ch - 2 }, cursor);
+            if (cursorChar1 === ": ") {
+                console.log("matched yaml prop");
 
-                //Remove the "," all links trigger if present so can keep typing and don't have to go remove it manually if you don't select a link to use
-                const origLineStr = editor.getLine(cursor.line);
-                const lastChar = origLineStr.substring(cursor.ch - 1, cursor.ch);
-
-                let myOffset = 0;
-                if (this.thisPlugin.trigCharMatch === this.thisPlugin.triggerCharSecondary && lastChar === this.thisPlugin.triggerCharAllLinks) {
-                    this.thisPlugin.trigCharMatch = `${this.thisPlugin.triggerCharSecondary}${this.thisPlugin.triggerCharAllLinks}`;
-                    this.thisPlugin.linkMode = 'all-semi';
-                    myOffset = 1;
+                const curLineStr1 = editor.getLine(cursor.line);
+                const curLineStrMatch1 = curLineStr1.substring(0, cursor.ch);
+                const curLineProp = curLineStr1.substring(0, cursor.ch - 2);
+                this.thisPlugin.linkMode = 'yaml-complete';
+                let foundValues: string[];
+                if (this.thisPlugin.yamlKVPairs) {
+                    foundValues = this.thisPlugin.yamlKVPairs.get(curLineProp);
                 }
-                if (this.thisPlugin.trigCharMatch === this.thisPlugin.triggerChar && lastChar === this.thisPlugin.triggerCharAllLinks) {
-                    this.thisPlugin.trigCharMatch = `${this.thisPlugin.triggerChar}${this.thisPlugin.triggerCharAllLinks}`;
-                    this.thisPlugin.linkMode = 'all';
-                    myOffset = 1;
-                }
-                let startRange: EditorPosition;
-                let endRange: EditorPosition;
-                switch (this.thisPlugin.trigCharMatch) {
-                    case this.thisPlugin.triggerCharSecondary:
-                        //Don't need to do anything special here
-                        break;
-                    case `${this.thisPlugin.triggerCharSecondary}${this.thisPlugin.triggerCharAllLinks}`:
-                        startRange = { line: cursor.line, ch: cursor.ch - 3 + myOffset };
-                        endRange = { line: cursor.line, ch: cursor.ch - 1 + myOffset };
-                        if (editor.getRange(startRange, endRange) === `${this.thisPlugin.triggerCharSecondary}${this.thisPlugin.triggerCharAllLinks}`) {
-                            editor.replaceRange('', startRange, endRange)
-                        }
-                        break;
-                    case `${this.thisPlugin.triggerChar}`:
-                        //Don't need to do anything special here
-                        break;
-                    case `${this.thisPlugin.triggerChar}${this.thisPlugin.triggerCharAllLinks}`:
-                        startRange = { line: cursor.line, ch: cursor.ch - 2 + myOffset };
-                        endRange = { line: cursor.line, ch: cursor.ch - 1 + myOffset };
-                        if (editor.getRange(startRange, endRange) === this.thisPlugin.triggerCharAllLinks) {
-                            editor.replaceRange('', startRange, endRange)
-                        }
-                        break;
-                }
-
-                //Need to grab the cursor position again as you may have removed a ';' or ',' for example above
-                const curCursor = editor.getCursor();
-                const curLineStr = editor.getLine(curCursor.line);
-                const newQuery = curLineStr.substring(this.context.start.ch, curCursor.ch);
-                if (newQuery.length < 4) {
+                console.log(foundValues);
+                if (foundValues) {
+                    this.thisPlugin.yamlLinks = foundValues;
+                    console.log(this.thisPlugin.yamlLinks);
+                    return {
+                        start: { line: cursor.line, ch: curLineStrMatch1.length },
+                        end: { line: cursor.line, ch: curLineStrMatch1.length },
+                        query: "test"
+                    };
+                } else {
                     this.thisPlugin.linkMatches = 0;
-                    return null
+                    return null;
                 }
-                return {
-                    start: { line: this.context.start.line, ch: this.context.start.ch },
-                    end: { line: curCursor.line, ch: curCursor.ch - myOffset },
-                    query: newQuery
-                };
             } else {
-                const cursorChar = editor.getRange({ line: cursor.line, ch: cursor.ch - 1 }, cursor)
-                if (cursorChar !== this.thisPlugin.triggerChar && cursorChar !== this.thisPlugin.triggerCharSecondary && cursorChar !== this.thisPlugin.triggerCharAllLinks) {
-                    this.thisPlugin.linkMatches = 0;
-                    return null;
-                }
+                //If this.context has a value that means the page autocomplete suggester is currently open
+                if (this.context && this.thisPlugin.linkMatches > 0) {
+                    //This allows the user to filter down the list even more when typing further instead of making it disappear
+                    //console.log(this.context);
 
-                //Check if Natural Language Dates (nld) plugin is enabled and if the auto complete suggester is present, skip
-                let nldActive = false;
-                let nldSuggest = false;
-                let nldTrigger;
-                let nld = (<any>this.thisPlugin.app).plugins.getPlugin('nldates-obsidian');
-                if (nld) {
-                    nldActive = true;
-                    nldSuggest = nld.settings.isAutosuggestEnabled;
-                    nldTrigger = nld.settings.autocompleteTriggerPhrase;
-                }
+                    //Remove the "," all links trigger if present so can keep typing and don't have to go remove it manually if you don't select a link to use
+                    const origLineStr = editor.getLine(cursor.line);
+                    const lastChar = origLineStr.substring(cursor.ch - 1, cursor.ch);
 
-                this.thisPlugin.linkMode = 'yaml';
-                this.thisPlugin.linkMatches = 0;
-                const curLineStr = editor.getLine(cursor.line);
-                if (nldActive && nldSuggest) {
-                    //This is to avoid interfering with the natural language dates plugin trigger which I am using ",," for
-                    if (curLineStr.indexOf(nldTrigger) > -1) {
-                        this.thisPlugin.linkMatches = 0;
-                        return null;
-                    }
-                }
-                const curLineStrMatch = curLineStr.substring(0, cursor.ch);
-                const cursorTwoChar = curLineStrMatch.substring(curLineStrMatch.length - 2);
-
-                let semiAll = false;
-                let spaceAll = false;
-                let continueProcessing: boolean = false;
-                if (this.thisPlugin.useEventListener) {
-                    if (this.thisPlugin.shiftSpace !== false) { continueProcessing = true }
-                } else {
-                    if (cursorTwoChar === `${this.thisPlugin.triggerCharSecondary}${this.thisPlugin.triggerCharAllLinks}`) { semiAll = true }
-                    if (cursorTwoChar === `${this.thisPlugin.triggerChar}${this.thisPlugin.triggerCharAllLinks}`) { spaceAll = true }
-                    if (cursorChar === this.thisPlugin.triggerChar || cursorChar === this.thisPlugin.triggerCharSecondary || semiAll || spaceAll) { continueProcessing = true }
-                }
-
-                if (continueProcessing === false) {
-                    this.thisPlugin.linkMatches = 0;
-                    return null;
-                } else {
-                    let lastWord;
-                    let charsBack = 1;
-                    if (cursorTwoChar === `${this.thisPlugin.triggerCharSecondary}${this.thisPlugin.triggerCharSecondary}` || cursorTwoChar === `${this.thisPlugin.triggerChar}${this.thisPlugin.triggerChar}` || semiAll || spaceAll) {
-                        charsBack = 2;
-                        const splitWords = curLineStrMatch.substring(0, curLineStrMatch.length - 2).split(' ');
-                        if (semiAll || spaceAll) {
-                            lastWord = splitWords.last();
-                        } else {
-                            const numWords = splitWords.length;
-                            if (numWords <= 1) {
-                                lastWord = splitWords[0];
-                            } else {
-                                lastWord = `${splitWords[numWords - 2]} ${splitWords[numWords - 1]}`;
-                            }
-                        }
-                    } else {
-                        lastWord = curLineStrMatch.substring(0, curLineStrMatch.length - 1).split(' ').last();
-                    }
-
-                    if (lastWord.trim() === "") {
-                        this.thisPlugin.linkMatches = 0;
-                        return null;
-                    }
-                    if (cursorChar === this.thisPlugin.triggerChar || cursorChar === this.thisPlugin.triggerCharAllLinks) {
-                        if (lastWord.length <= 2) {
-                            this.thisPlugin.linkMatches = 0;
-                            return null;
-                        }
-                        if (lastWord.length === 3 && lastWord !== lastWord.toUpperCase()) {
-                            this.thisPlugin.linkMatches = 0;
-                            return null;
-                        } //For capitalized acronyms
-                    }
-
-                    /* TESTING FUZZY MATCHING
-                    const prepQuery = prepareQuery('testing this');
-                    console.log(prepQuery);
-                    const prepFuzzySearch = prepareFuzzySearch("testing more");
-                    console.log(prepFuzzySearch);
-                    */
-
-                    if (cursorChar === this.thisPlugin.triggerCharSecondary) {
-                        this.thisPlugin.trigCharMatch = this.thisPlugin.triggerCharSecondary;
-                        return {
-                            start: { line: cursor.line, ch: curLineStrMatch.length - charsBack - lastWord.length },
-                            end: { line: cursor.line, ch: curLineStrMatch.length },
-                            query: lastWord
-                        };
-                    } else if (semiAll) {
-                        this.thisPlugin.linkMode = 'all-semi';
+                    let myOffset = 0;
+                    if (this.thisPlugin.trigCharMatch === this.thisPlugin.triggerCharSecondary && lastChar === this.thisPlugin.triggerCharAllLinks) {
                         this.thisPlugin.trigCharMatch = `${this.thisPlugin.triggerCharSecondary}${this.thisPlugin.triggerCharAllLinks}`;
-                        return {
-                            start: { line: cursor.line, ch: curLineStrMatch.length - charsBack - lastWord.length },
-                            end: { line: cursor.line, ch: curLineStrMatch.length },
-                            query: lastWord
-                        };
-                    } else if (spaceAll) {
-                        this.thisPlugin.linkMode = 'all';
+                        this.thisPlugin.linkMode = 'all-semi';
+                        myOffset = 1;
+                    }
+                    if (this.thisPlugin.trigCharMatch === this.thisPlugin.triggerChar && lastChar === this.thisPlugin.triggerCharAllLinks) {
                         this.thisPlugin.trigCharMatch = `${this.thisPlugin.triggerChar}${this.thisPlugin.triggerCharAllLinks}`;
-                        return {
-                            start: { line: cursor.line, ch: curLineStrMatch.length - charsBack - lastWord.length },
-                            end: { line: cursor.line, ch: curLineStrMatch.length },
-                            query: lastWord
-                        };
+                        this.thisPlugin.linkMode = 'all';
+                        myOffset = 1;
+                    }
+                    let startRange: EditorPosition;
+                    let endRange: EditorPosition;
+                    switch (this.thisPlugin.trigCharMatch) {
+                        case this.thisPlugin.triggerCharSecondary:
+                            //Don't need to do anything special here
+                            break;
+                        case `${this.thisPlugin.triggerCharSecondary}${this.thisPlugin.triggerCharAllLinks}`:
+                            startRange = { line: cursor.line, ch: cursor.ch - 3 + myOffset };
+                            endRange = { line: cursor.line, ch: cursor.ch - 1 + myOffset };
+                            if (editor.getRange(startRange, endRange) === `${this.thisPlugin.triggerCharSecondary}${this.thisPlugin.triggerCharAllLinks}`) {
+                                editor.replaceRange('', startRange, endRange)
+                            }
+                            break;
+                        case `${this.thisPlugin.triggerChar}`:
+                            //Don't need to do anything special here
+                            break;
+                        case `${this.thisPlugin.triggerChar}${this.thisPlugin.triggerCharAllLinks}`:
+                            startRange = { line: cursor.line, ch: cursor.ch - 2 + myOffset };
+                            endRange = { line: cursor.line, ch: cursor.ch - 1 + myOffset };
+                            if (editor.getRange(startRange, endRange) === this.thisPlugin.triggerCharAllLinks) {
+                                editor.replaceRange('', startRange, endRange)
+                            }
+                            break;
+                    }
+
+                    //Need to grab the cursor position again as you may have removed a ';' or ',' for example above
+                    const curCursor = editor.getCursor();
+                    const curLineStr = editor.getLine(curCursor.line);
+                    const newQuery = curLineStr.substring(this.context.start.ch, curCursor.ch);
+                    if (newQuery.length < 4) {
+                        this.thisPlugin.linkMatches = 0;
+                        return null
+                    }
+                    return {
+                        start: { line: this.context.start.line, ch: this.context.start.ch },
+                        end: { line: curCursor.line, ch: curCursor.ch - myOffset },
+                        query: newQuery
+                    };
+                } else {
+                    const cursorChar = editor.getRange({ line: cursor.line, ch: cursor.ch - 1 }, cursor)
+                    if (cursorChar !== this.thisPlugin.triggerChar && cursorChar !== this.thisPlugin.triggerCharSecondary && cursorChar !== this.thisPlugin.triggerCharAllLinks) {
+                        this.thisPlugin.linkMatches = 0;
+                        return null;
+                    }
+
+                    //Check if Natural Language Dates (nld) plugin is enabled and if the auto complete suggester is present, skip
+                    let nldActive = false;
+                    let nldSuggest = false;
+                    let nldTrigger;
+                    let nld = (<any>this.thisPlugin.app).plugins.getPlugin('nldates-obsidian');
+                    if (nld) {
+                        nldActive = true;
+                        nldSuggest = nld.settings.isAutosuggestEnabled;
+                        nldTrigger = nld.settings.autocompleteTriggerPhrase;
+                    }
+
+                    this.thisPlugin.linkMode = 'yaml';
+                    this.thisPlugin.linkMatches = 0;
+                    const curLineStr = editor.getLine(cursor.line);
+                    if (nldActive && nldSuggest) {
+                        //This is to avoid interfering with the natural language dates plugin trigger which I am using ",," for
+                        if (curLineStr.indexOf(nldTrigger) > -1) {
+                            this.thisPlugin.linkMatches = 0;
+                            return null;
+                        }
+                    }
+                    const curLineStrMatch = curLineStr.substring(0, cursor.ch);
+                    const cursorTwoChar = curLineStrMatch.substring(curLineStrMatch.length - 2);
+
+                    let semiAll = false;
+                    let spaceAll = false;
+                    let continueProcessing: boolean = false;
+                    if (this.thisPlugin.useEventListener) {
+                        if (this.thisPlugin.shiftSpace !== false) { continueProcessing = true }
                     } else {
-                        this.thisPlugin.trigCharMatch = `${this.thisPlugin.triggerChar}`;
-                        return {
-                            start: { line: cursor.line, ch: curLineStrMatch.length - charsBack - lastWord.length },
-                            end: { line: cursor.line, ch: curLineStrMatch.length },
-                            query: lastWord
-                        };
+                        if (cursorTwoChar === `${this.thisPlugin.triggerCharSecondary}${this.thisPlugin.triggerCharAllLinks}`) { semiAll = true }
+                        if (cursorTwoChar === `${this.thisPlugin.triggerChar}${this.thisPlugin.triggerCharAllLinks}`) { spaceAll = true }
+                        if (cursorChar === this.thisPlugin.triggerChar || cursorChar === this.thisPlugin.triggerCharSecondary || semiAll || spaceAll) { continueProcessing = true }
+                    }
+
+                    if (continueProcessing === false) {
+                        this.thisPlugin.linkMatches = 0;
+                        return null;
+                    } else {
+                        let lastWord;
+                        let charsBack = 1;
+                        if (cursorTwoChar === `${this.thisPlugin.triggerCharSecondary}${this.thisPlugin.triggerCharSecondary}` || cursorTwoChar === `${this.thisPlugin.triggerChar}${this.thisPlugin.triggerChar}` || semiAll || spaceAll) {
+                            charsBack = 2;
+                            const splitWords = curLineStrMatch.substring(0, curLineStrMatch.length - 2).split(' ');
+                            if (semiAll || spaceAll) {
+                                lastWord = splitWords.last();
+                            } else {
+                                const numWords = splitWords.length;
+                                if (numWords <= 1) {
+                                    lastWord = splitWords[0];
+                                } else {
+                                    lastWord = `${splitWords[numWords - 2]} ${splitWords[numWords - 1]}`;
+                                }
+                            }
+                        } else {
+                            lastWord = curLineStrMatch.substring(0, curLineStrMatch.length - 1).split(' ').last();
+                        }
+
+                        if (lastWord.trim() === "") {
+                            this.thisPlugin.linkMatches = 0;
+                            return null;
+                        }
+                        if (cursorChar === this.thisPlugin.triggerChar || cursorChar === this.thisPlugin.triggerCharAllLinks) {
+                            if (lastWord.length <= 2) {
+                                this.thisPlugin.linkMatches = 0;
+                                return null;
+                            }
+                            if (lastWord.length === 3 && lastWord !== lastWord.toUpperCase()) {
+                                this.thisPlugin.linkMatches = 0;
+                                return null;
+                            } //For capitalized acronyms
+                        }
+
+                        /* TESTING FUZZY MATCHING
+                        const prepQuery = prepareQuery('testing this');
+                        console.log(prepQuery);
+                        const prepFuzzySearch = prepareFuzzySearch("testing more");
+                        console.log(prepFuzzySearch);
+                        */
+
+                        if (cursorChar === this.thisPlugin.triggerCharSecondary) {
+                            this.thisPlugin.trigCharMatch = this.thisPlugin.triggerCharSecondary;
+                            return {
+                                start: { line: cursor.line, ch: curLineStrMatch.length - charsBack - lastWord.length },
+                                end: { line: cursor.line, ch: curLineStrMatch.length },
+                                query: lastWord
+                            };
+                        } else if (semiAll) {
+                            this.thisPlugin.linkMode = 'all-semi';
+                            this.thisPlugin.trigCharMatch = `${this.thisPlugin.triggerCharSecondary}${this.thisPlugin.triggerCharAllLinks}`;
+                            return {
+                                start: { line: cursor.line, ch: curLineStrMatch.length - charsBack - lastWord.length },
+                                end: { line: cursor.line, ch: curLineStrMatch.length },
+                                query: lastWord
+                            };
+                        } else if (spaceAll) {
+                            this.thisPlugin.linkMode = 'all';
+                            this.thisPlugin.trigCharMatch = `${this.thisPlugin.triggerChar}${this.thisPlugin.triggerCharAllLinks}`;
+                            return {
+                                start: { line: cursor.line, ch: curLineStrMatch.length - charsBack - lastWord.length },
+                                end: { line: cursor.line, ch: curLineStrMatch.length },
+                                query: lastWord
+                            };
+                        } else {
+                            this.thisPlugin.trigCharMatch = `${this.thisPlugin.triggerChar}`;
+                            return {
+                                start: { line: cursor.line, ch: curLineStrMatch.length - charsBack - lastWord.length },
+                                end: { line: cursor.line, ch: curLineStrMatch.length },
+                                query: lastWord
+                            };
+                        }
                     }
                 }
             }
@@ -458,11 +493,17 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
                 allLinks.push(...this.thisPlugin.yamlLinks.sort(function (a, b) { return a.length - b.length }));
                 allLinks.push(...this.thisPlugin.vaultLinks.sort(function (a, b) { return a.length - b.length }));
                 break;
+            case 'yaml-complete':
+                allLinks.push(...this.thisPlugin.yamlLinks.sort(function (a, b) { return a.length - b.length }));
+                break;
             default:
                 allLinks.push(...this.thisPlugin.fileLinks.sort(function (a, b) { return a.length - b.length }));
         }
 
         let matchingItems = allLinks.filter(eachLink => eachLink.toLowerCase().contains(queryText.toLowerCase()));
+        if (this.thisPlugin.linkMode === 'yaml-complete') {
+            matchingItems = allLinks;
+        }
         let finalItems: string[] = Array.from(new Set(matchingItems));
         if (finalItems.length > 0) {
             this.thisPlugin.linkMatches = finalItems.length;
@@ -529,8 +570,9 @@ function getLinksFromFile(thisPlugin: MyPlugin, myFile: TFile, allLinks: LinkCac
     }
 }
 
-function findLinksRelatedYamlKeyValue(thisPlugin: MyPlugin, myFile: TFile, mdYaml: FrontMatterCache = null): string[] {
+function findLinksRelatedYamlKeyValue(thisPlugin: MyPlugin, myFile: TFile, mdYaml: FrontMatterCache = null): { links: string[], yamlKeyValues: Map<any, any> | null} {
     thisPlugin.yamlLinks = [];
+    let yamlKVMap = new Map();
     //console.log('findLinksRelatedYamlKeyValue');
     if (!mdYaml) {
         const mdCache = thisPlugin.app.metadataCache.getFileCache(myFile);
@@ -550,6 +592,21 @@ function findLinksRelatedYamlKeyValue(thisPlugin: MyPlugin, myFile: TFile, mdYam
                 let eachYaml = eachCache ? eachCache.frontmatter : null;
                 if (eachYaml) {
                     yamlFiles.push({ theFile: eachFile, mdCache: eachCache });
+
+                    let theKeys = Object.keys(eachYaml);
+                    theKeys.forEach(eachKey => {
+                        if (eachKey !== "position") {
+                            if (eachYaml[eachKey]) {
+                                let curMap: string[] = yamlKVMap.get(eachKey);
+                                if (curMap) {
+                                    curMap.push(eachYaml[eachKey]);
+                                } else {
+                                    curMap = [eachYaml[eachKey]];
+                                }
+                                yamlKVMap.set(eachKey, curMap);
+                            }
+                        }
+                    })
                 }
             }
         });
@@ -588,14 +645,16 @@ function findLinksRelatedYamlKeyValue(thisPlugin: MyPlugin, myFile: TFile, mdYam
                 myLinks.push(...myNewLinks);
             }
         });
-        return myLinks;
+        console.log(yamlKVMap);
+        return { links: myLinks, yamlKeyValues: yamlKVMap };
     } else {
-        return []
+        return { links: [], yamlKeyValues: null }
     }
 }
 
 function getAllVaultLinks(thisPlugin: MyPlugin): string[] {
-    console.time('getAllVaultLinks()');
+    //On average less than 10ms
+    //console.time('getAllVaultLinks()');
     const files = thisPlugin.app.vault.getMarkdownFiles();
     let links: string[] = [];
     files.forEach((file: TFile) => {
@@ -607,6 +666,6 @@ function getAllVaultLinks(thisPlugin: MyPlugin): string[] {
         if (theValues.length > 0) { links.push(...theValues) }
     });
     let uniq: string[] = Array.from(new Set(links));
-    console.timeEnd('getAllVaultLinks()');
+    //console.timeEnd('getAllVaultLinks()');
     return uniq
 }

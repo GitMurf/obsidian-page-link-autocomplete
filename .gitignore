@@ -20,4 +20,4 @@ main.js
 data.json
 
 # dev esbuild
-dev-esbuild.config.mjs
+dev-esbuild*.config.mjs

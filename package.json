@@ -6,7 +6,8 @@
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
 		"build": "node esbuild.config.mjs production",
-        "dev-local": "node dev-esbuild.config.mjs"
+        "dev-local": "node dev-esbuild.config.mjs",
+        "dev-local-2": "node dev-esbuild-2.config.mjs"
 	},
 	"keywords": [],
 	"author": "",
