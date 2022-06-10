@@ -5,7 +5,7 @@
 
 This is a plugin for Obsidian (https://obsidian.md).
 
-Quick rought explanation... a page suggestion / auto complete for [[linking]].
+Quick rough explanation... a page suggestion / auto complete for [[linking]].
 
 - It activates on entering a space and looks at the previous word and only suggests things if the previous word is 4 characters or more (to avoid showing suggestions on small article words etc.)
 - By default it suggests from a list of all links on your current page for easy re-linking as you type the same terms multiple times on a page
