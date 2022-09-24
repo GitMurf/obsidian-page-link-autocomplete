@@ -1,18 +1,7 @@
-import { App, Editor, Plugin, PluginSettingTab, Setting, EditorSuggest, EditorPosition, TFile, EditorSuggestTriggerInfo, EditorSuggestContext, LinkCache, prepareQuery, prepareFuzzySearch, FrontMatterCache, MetadataCache, CachedMetadata } from 'obsidian';
-declare module "obsidian" {
-    interface WorkspaceLeaf {
-        containerEl: HTMLElement;
-    }
-}
+import { App, Editor, Plugin, PluginSettingTab, Setting, EditorSuggest, EditorPosition, TFile, EditorSuggestTriggerInfo, EditorSuggestContext, LinkCache, prepareQuery, prepareFuzzySearch, FrontMatterCache } from 'obsidian';
+import { MyPluginSettings, PatchedCachedMetadata, PatchedFrontMatterCache, PatchedFrontMatterValues, RelatedYamlLinks, YamlFiles, YamlKeyValMap } from 'types';
+
 const pluginName = 'Page Link Autocomplete';
-
-// Remember to rename these classes and interfaces!
-
-interface MyPluginSettings {
-    autoSpace: boolean;
-    secondaryTrigger: string;
-    getAlias: boolean;
-}
 
 const DEFAULT_SETTINGS: MyPluginSettings = {
     autoSpace: false,
@@ -32,7 +21,7 @@ export default class MyPlugin extends Plugin {
     fileLinks: string[];
     curYaml: FrontMatterCache;
     yamlLinks: string[];
-    yamlKVPairs: Map<any, any>;
+    yamlKVPairs: YamlKeyValMap;
     vaultLinks: string[];
     linkMode: string;
     linkMatches: number;
@@ -53,15 +42,6 @@ export default class MyPlugin extends Plugin {
         //instead of just regular EditorSuggest looking at last entered character(s)
         this.useEventListener = false;
         this.registerEditorSuggest(new PageLinkAutocompleteSuggester(this.app, this));
-
-        // This adds a simple command that can be triggered anywhere
-        this.addCommand({
-            id: 'open-sample-modal-simple',
-            name: 'Open sample modal (simple)',
-            callback: () => {
-                //new SampleModal(this.app).open();
-            }
-        });
 
         // This adds a settings tab so the user can configure various aspects of the plugin
         this.addSettingTab(new SampleSettingTab(this.app, this));
@@ -99,11 +79,14 @@ export default class MyPlugin extends Plugin {
                         }
                         if (mdCache.frontmatter) {
                             if (JSON.stringify(this.curYaml) !== JSON.stringify(mdCache.frontmatter)) {
-                                //console.time('onMetaChange - frontmatter');
-                                let theseResults = findLinksRelatedYamlKeyValue(this, file, mdCache.frontmatter);
+                                console.time('onMetaChange - frontmatter');
+                                console.log(mdCache.frontmatter);
+                                const theseResults = findLinksRelatedYamlKeyValue(this, file, mdCache.frontmatter);
                                 this.yamlLinks = theseResults.links;
                                 this.yamlKVPairs = theseResults.yamlKeyValues;
-                                //console.timeEnd('onMetaChange - frontmatter');
+                                // console.log('yamlLinks: ', this.yamlLinks);
+                                // console.log('yamlKVPairs', this.yamlKVPairs);
+                                console.timeEnd('onMetaChange - frontmatter');
                             }
                         }
                     }
@@ -142,7 +125,7 @@ export default class MyPlugin extends Plugin {
     async onFileChange() {
         this.fileLinks = [];
         this.yamlLinks = [];
-        this.yamlKVPairs = new Map();
+        this.yamlKVPairs = {};
         this.vaultLinks = [];
         //console.log('onFileChange()');
         //console.time('onFileChange');
@@ -152,6 +135,7 @@ export default class MyPlugin extends Plugin {
                 const mdCache = this.app.metadataCache.getFileCache(actFile);
                 this.fileLinks = getLinksFromFile(this, actFile, mdCache.links);
                 let theseResults = findLinksRelatedYamlKeyValue(this, actFile, mdCache.frontmatter);
+                console.log("theseResults", theseResults);
                 this.yamlLinks = theseResults.links;
                 this.yamlKVPairs = theseResults.yamlKeyValues;
                 this.vaultLinks = getAllVaultLinks(this);
@@ -259,7 +243,7 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
         } else {
             const cursorChar1 = editor.getRange({ line: cursor.line, ch: cursor.ch - 2 }, cursor);
             if (cursorChar1 === ": ") {
-                console.log("matched yaml prop");
+                //console.log("matched yaml prop");
 
                 const curLineStr1 = editor.getLine(cursor.line);
                 const curLineStrMatch1 = curLineStr1.substring(0, cursor.ch);
@@ -267,12 +251,12 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
                 this.thisPlugin.linkMode = 'yaml-complete';
                 let foundValues: string[];
                 if (this.thisPlugin.yamlKVPairs) {
-                    foundValues = this.thisPlugin.yamlKVPairs.get(curLineProp);
+                    foundValues = this.thisPlugin.yamlKVPairs[curLineProp];
                 }
-                console.log(foundValues);
+                //console.log(foundValues);
                 if (foundValues) {
                     this.thisPlugin.yamlLinks = foundValues;
-                    console.log(this.thisPlugin.yamlLinks);
+                    //console.log(this.thisPlugin.yamlLinks);
                     return {
                         start: { line: cursor.line, ch: curLineStrMatch1.length },
                         end: { line: cursor.line, ch: curLineStrMatch1.length },
@@ -499,10 +483,21 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
             default:
                 allLinks.push(...this.thisPlugin.fileLinks.sort(function (a, b) { return a.length - b.length }));
         }
-
-        let matchingItems = allLinks.filter(eachLink => eachLink.toLowerCase().contains(queryText.toLowerCase()));
-        if (this.thisPlugin.linkMode === 'yaml-complete') {
+        // get unique values of allLinks
+        allLinks = [...new Set(allLinks)];
+        console.log('linkMode:', this.thisPlugin.linkMode, 'allLinks:', allLinks);
+        let matchingItems: string[] = [];
+        if (this.thisPlugin.linkMode === 'yaml-complete') { // TODO: continue filtering as I type more YAML value characters
             matchingItems = allLinks;
+        } else {
+            matchingItems = allLinks.filter(eachLink => {
+                //Adding another match criteria here for fuzzy matching. For example "hotreload" will match "hot reload" by removing the spaces.
+                if (eachLink.toString().toLowerCase().contains(queryText.toLowerCase()) || eachLink.toString().toLowerCase().replace(/ /g, '').contains(queryText.toLowerCase())) {
+                    return true;
+                } else {
+                    return false;
+                }
+            });
         }
         let finalItems: string[] = Array.from(new Set(matchingItems));
         if (finalItems.length > 0) {
@@ -515,7 +510,7 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
     }
 
     renderSuggestion(value: string, el: HTMLElement) {
-        const aliasSplit = value.split('|');
+        const aliasSplit = value.toString().split('|');
         aliasSplit.length > 1 ? el.setText(aliasSplit[1]) : el.setText(value);
     }
 
@@ -550,7 +545,7 @@ function getLinksFromFile(thisPlugin: MyPlugin, myFile: TFile, allLinks: LinkCac
     }
     thisPlugin.curMdCacheLinks = allLinks;
     if (allLinks) {
-        let myLinks: string[] = [];
+        const myLinks: string[] = [];
         allLinks.forEach(eachLink => {
             if (eachLink.displayText) {
                 if (eachLink.displayText === eachLink.link) {
@@ -570,9 +565,9 @@ function getLinksFromFile(thisPlugin: MyPlugin, myFile: TFile, allLinks: LinkCac
     }
 }
 
-function findLinksRelatedYamlKeyValue(thisPlugin: MyPlugin, myFile: TFile, mdYaml: FrontMatterCache = null): { links: string[], yamlKeyValues: Map<any, any> | null} {
+function findLinksRelatedYamlKeyValue(thisPlugin: MyPlugin, myFile: TFile, mdYaml: FrontMatterCache = null): RelatedYamlLinks {
     thisPlugin.yamlLinks = [];
-    let yamlKVMap = new Map();
+    const yamlKVMap: YamlKeyValMap = {};
     //console.log('findLinksRelatedYamlKeyValue');
     if (!mdYaml) {
         const mdCache = thisPlugin.app.metadataCache.getFileCache(myFile);
@@ -584,26 +579,38 @@ function findLinksRelatedYamlKeyValue(thisPlugin: MyPlugin, myFile: TFile, mdYam
     }
     thisPlugin.curYaml = mdYaml;
     if (mdYaml) {
+        const patchedFrontMatter: PatchedFrontMatterCache = mdYaml as PatchedFrontMatterCache;
         const allFiles = thisPlugin.app.vault.getMarkdownFiles();
-        let yamlFiles: { theFile: TFile, mdCache: CachedMetadata }[] = [];
+        const yamlFiles: YamlFiles[] = [];
         allFiles.forEach(eachFile => {
             if (eachFile != myFile) {
-                const eachCache = thisPlugin.app.metadataCache.getFileCache(eachFile);
-                let eachYaml = eachCache ? eachCache.frontmatter : null;
+                const eachCache: PatchedCachedMetadata = thisPlugin.app.metadataCache.getFileCache(eachFile);
+                const eachYaml = eachCache.frontmatter;
                 if (eachYaml) {
-                    yamlFiles.push({ theFile: eachFile, mdCache: eachCache });
-
-                    let theKeys = Object.keys(eachYaml);
+                    const theKeys = Object.keys(eachYaml);
+                    yamlFiles.push(
+                        {
+                            theFile: eachFile,
+                            mdCache: eachCache,
+                            fmKeys: theKeys
+                        }
+                    );
                     theKeys.forEach(eachKey => {
-                        if (eachKey !== "position") {
-                            if (eachYaml[eachKey]) {
-                                let curMap: string[] = yamlKVMap.get(eachKey);
-                                if (curMap) {
-                                    curMap.push(eachYaml[eachKey]);
+                        if (eachKey !== 'position') {
+                            const eachValS = eachYaml[eachKey] as PatchedFrontMatterValues | PatchedFrontMatterValues[];
+                            if (eachValS) {
+                                const eachValSArray = convertToArray(eachValS, true);
+                                let curMap = yamlKVMap[eachKey];
+                                if (curMap?.length > 0) {
+                                    eachValSArray.forEach(eachVal => {
+                                        if (!curMap.includes(eachVal)) {
+                                            curMap.push(eachVal);
+                                        }
+                                    });
                                 } else {
-                                    curMap = [eachYaml[eachKey]];
+                                    curMap = eachValSArray;
                                 }
-                                yamlKVMap.set(eachKey, curMap);
+                                yamlKVMap[eachKey] = curMap;
                             }
                         }
                     })
@@ -611,41 +618,45 @@ function findLinksRelatedYamlKeyValue(thisPlugin: MyPlugin, myFile: TFile, mdYam
             }
         });
 
-        let myLinks: string[] = [];
-        const yKeys = Object.keys(mdYaml);
-        const ignoreKeys = ['position', 'categories', 'tags'];
-        yamlFiles.forEach(eachFileYaml => {
-            let fileMatch: boolean = false;
-            yKeys.forEach(eachKey => {
-                if (!ignoreKeys.includes(eachKey)) {
-                    const matchingValue = eachFileYaml.mdCache.frontmatter[eachKey];
-                    if (matchingValue) {
-                        const yamlKey = typeof mdYaml[eachKey] === 'number' ? mdYaml[eachKey].toString() : mdYaml[eachKey];
-                        const valArray: Array<string> = typeof yamlKey === 'string' ? [yamlKey] : yamlKey;
-                        if (Array.isArray(valArray)) {
-                            valArray.forEach(eachVal => {
-                                const eachYamlKey = typeof matchingValue === 'number' ? matchingValue.toString() : matchingValue;
-                                let valuesArr: Array<string> = [];
-                                valuesArr = typeof eachYamlKey === 'string' ? [eachYamlKey] : eachYamlKey;
-                                if (Array.isArray(valuesArr)) {
-                                    valuesArr.forEach(eachValue => {
-                                        if (eachValue.toString().toLowerCase() === eachVal.toString().toLowerCase()) {
-                                            if (addlink(myLinks, eachFileYaml.theFile.basename)) { myLinks.push(eachFileYaml.theFile.basename) }
-                                            fileMatch = true;
-                                        }
-                                    });
+        const myLinks: string[] = [];
+        const actFileKeys = Object.keys(patchedFrontMatter);
+        // Changing to an opt-in instead of opt-out for keys to be included in the YAML link search
+        // TODO also add matches for any files created and modified on the same day of the active note OR the same day as today you are working on a note
+        const includeKeys = ['company', 'related', 'test', 'projectId', 'clientId', 'description'];
+        const matchedKeys = actFileKeys.filter(eachActKey => {
+            const matchIncludeKeys = includeKeys.find(eachIncKey => isMatchAnyCase(eachActKey, eachIncKey));
+            return matchIncludeKeys?.length > 0 ? true : false;
+        });
+        yamlFiles.forEach(eachYamlFile => {
+            let fileMatch = false;
+            eachYamlFile.fmKeys.forEach(eachFileKey => {
+                if (fileMatch) return;
+                matchedKeys.forEach(eachMatchKey => {
+                    if (isMatchAnyCase(eachFileKey, eachMatchKey)) {
+                        const actFileVals = patchedFrontMatter[eachMatchKey];
+                        const actFileValsArray = convertToArray(actFileVals, true);
+                        const eachFileVals = eachYamlFile.mdCache.frontmatter[eachFileKey];
+                        const eachFileValsArray = convertToArray(eachFileVals, true);
+                        actFileValsArray.forEach(eachActVal => {
+                            eachFileValsArray.forEach(eachFileVal => {
+                                if (isMatchAnyCase(eachActVal.toString(), eachFileVal.toString())) {
+                                    fileMatch = true;
+                                    if (addlink(myLinks, eachYamlFile.theFile.basename)) { myLinks.push(eachYamlFile.theFile.basename) }
+                                    console.log('YAML fileMatch:', eachYamlFile.theFile.basename, eachMatchKey, eachActVal, eachFileKey, eachFileVal);
                                 }
                             });
-                        }
+                        });
                     }
-                }
+                });
             });
             if (fileMatch) {
-                let myNewLinks: string[] = getLinksFromFile(thisPlugin, eachFileYaml.theFile, eachFileYaml.mdCache.links);
+                const myNewLinks = getLinksFromFile(thisPlugin, eachYamlFile.theFile, eachYamlFile.mdCache.links);
                 myLinks.push(...myNewLinks);
             }
         });
-        console.log(yamlKVMap);
+
+        console.log('myLinks', myLinks);
+        console.log('yamlKVMap', yamlKVMap);
         return { links: myLinks, yamlKeyValues: yamlKVMap };
     } else {
         return { links: [], yamlKeyValues: null }
@@ -668,4 +679,51 @@ function getAllVaultLinks(thisPlugin: MyPlugin): string[] {
     let uniq: string[] = Array.from(new Set(links));
     //console.timeEnd('getAllVaultLinks()');
     return uniq
+}
+
+function getVariableType(value: any): 'string' | 'number' | 'boolean' | 'object' | 'array' | 'unknown' | 'null' | 'undefined' | 'function' {
+    if (typeof value === 'undefined') {
+        return 'undefined';
+    } else if (value === null) {
+        return 'null';
+    } else if (typeof value === 'string') {
+        return 'string';
+    } else if (typeof value === 'number') {
+        return 'number';
+    } else if (typeof value === 'boolean') {
+        return 'boolean';
+    } else if (Array.isArray(value)) {
+        return 'array';
+    } else if (typeof value === 'object') {
+        return 'object';
+    } else if (typeof value === 'function') {
+        return 'function';
+    } else {
+        return 'unknown';
+    }
+}
+
+function convertToArray<T>(value: T | T[], byValue = true): T[] {
+    // When byValue is true, this will create a copy and NOT have references to the original array
+    if (Array.isArray(value)) {
+        if (byValue) {
+            return [...value];
+        } else {
+            return value;
+        }
+    } else {
+        if( value ) {
+            return [value];
+        } else {
+            return [];
+        }
+    }
+}
+
+function toCapitalizeFirstLetter(str: string): string {
+    return str.charAt(0).toUpperCase() + str.toLowerCase().slice(1);
+}
+
+function isMatchAnyCase(str1: string, str2: string): boolean {
+    return str1.toLowerCase() === str2.toLowerCase() || toCapitalizeFirstLetter(str1) === toCapitalizeFirstLetter(str2);
 }
