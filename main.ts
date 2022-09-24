@@ -1,3 +1,4 @@
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { App, Editor, Plugin, PluginSettingTab, Setting, EditorSuggest, EditorPosition, TFile, EditorSuggestTriggerInfo, EditorSuggestContext, LinkCache, prepareQuery, prepareFuzzySearch, FrontMatterCache } from 'obsidian';
 import { MyPluginSettings, PatchedCachedMetadata, PatchedFrontMatterCache, PatchedFrontMatterValues, RelatedYamlLinks, YamlFiles, YamlKeyValMap } from 'types';
 
@@ -11,11 +12,11 @@ const DEFAULT_SETTINGS: MyPluginSettings = {
 
 export default class MyPlugin extends Plugin {
     settings: MyPluginSettings;
-    triggerChar: string = ' ';
-    triggerCharSecondary: string = ';';
-    triggerCharAllLinks: string = ',';
-    useEventListener: boolean = false;
-    shiftSpace: boolean = false;
+    triggerChar = ' ';
+    triggerCharSecondary = ';';
+    triggerCharAllLinks = ',';
+    useEventListener = false;
+    shiftSpace = false;
     modRoot: HTMLDivElement = null;
     curMdCacheLinks: LinkCache[];
     fileLinks: string[];
@@ -114,7 +115,7 @@ export default class MyPlugin extends Plugin {
         if (actFile) {
             const mdCache = this.app.metadataCache.getFileCache(actFile);
             this.fileLinks = getLinksFromFile(this, actFile, mdCache.links);
-            let theseResults = findLinksRelatedYamlKeyValue(this, actFile, mdCache.frontmatter);
+            const theseResults = findLinksRelatedYamlKeyValue(this, actFile, mdCache.frontmatter);
             this.yamlLinks = theseResults.links;
             this.yamlKVPairs = theseResults.yamlKeyValues;
             this.vaultLinks = getAllVaultLinks(this);
@@ -134,7 +135,7 @@ export default class MyPlugin extends Plugin {
             if (actFile) {
                 const mdCache = this.app.metadataCache.getFileCache(actFile);
                 this.fileLinks = getLinksFromFile(this, actFile, mdCache.links);
-                let theseResults = findLinksRelatedYamlKeyValue(this, actFile, mdCache.frontmatter);
+                const theseResults = findLinksRelatedYamlKeyValue(this, actFile, mdCache.frontmatter);
                 console.log("theseResults", theseResults);
                 this.yamlLinks = theseResults.links;
                 this.yamlKVPairs = theseResults.yamlKeyValues;
@@ -181,7 +182,7 @@ class SampleSettingTab extends PluginSettingTab {
     }
 
     display(): void {
-        let { containerEl } = this;
+        const { containerEl } = this;
         containerEl.empty();
         containerEl.createEl('h2', { text: 'Page Link Autocomplete Settings' });
 
@@ -200,7 +201,7 @@ class SampleSettingTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 }));
 
-        let thisElem = new Setting(containerEl)
+        const thisElem = new Setting(containerEl)
             .setName('Secondary Suggest Trigger')
             .setDesc(createFragment((innerFrag) => {
                 innerFrag.createEl('span', { text: 'Character that manually triggers the suggester' });
@@ -249,13 +250,14 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
                 const curLineStrMatch1 = curLineStr1.substring(0, cursor.ch);
                 const curLineProp = curLineStr1.substring(0, cursor.ch - 2);
                 this.thisPlugin.linkMode = 'yaml-complete';
-                let foundValues: string[];
+                let foundValues: PatchedFrontMatterValues[];
+                // TODO - make case insensitive so keys can be in any case
                 if (this.thisPlugin.yamlKVPairs) {
                     foundValues = this.thisPlugin.yamlKVPairs[curLineProp];
                 }
                 //console.log(foundValues);
                 if (foundValues) {
-                    this.thisPlugin.yamlLinks = foundValues;
+                    this.thisPlugin.yamlLinks = foundValues.map(val => val.toString());
                     //console.log(this.thisPlugin.yamlLinks);
                     return {
                         start: { line: cursor.line, ch: curLineStrMatch1.length },
@@ -335,12 +337,12 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
                     //Check if Natural Language Dates (nld) plugin is enabled and if the auto complete suggester is present, skip
                     let nldActive = false;
                     let nldSuggest = false;
-                    let nldTrigger;
-                    let nld = (<any>this.thisPlugin.app).plugins.getPlugin('nldates-obsidian');
+                    let nldTrigger = "";
+                    const nld = this.thisPlugin.app.plugins.getPlugin('nldates-obsidian');
                     if (nld) {
                         nldActive = true;
-                        nldSuggest = nld.settings.isAutosuggestEnabled;
-                        nldTrigger = nld.settings.autocompleteTriggerPhrase;
+                        nldSuggest = nld.settings.isAutosuggestEnabled as boolean;
+                        nldTrigger = nld.settings.autocompleteTriggerPhrase as string;
                     }
 
                     this.thisPlugin.linkMode = 'yaml';
@@ -358,7 +360,7 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
 
                     let semiAll = false;
                     let spaceAll = false;
-                    let continueProcessing: boolean = false;
+                    let continueProcessing = false;
                     if (this.thisPlugin.useEventListener) {
                         if (this.thisPlugin.shiftSpace !== false) { continueProcessing = true }
                     } else {
@@ -499,7 +501,7 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
                 }
             });
         }
-        let finalItems: string[] = Array.from(new Set(matchingItems));
+        const finalItems: string[] = Array.from(new Set(matchingItems));
         if (finalItems.length > 0) {
             this.thisPlugin.linkMatches = finalItems.length;
             return finalItems
@@ -667,20 +669,21 @@ function getAllVaultLinks(thisPlugin: MyPlugin): string[] {
     //On average less than 10ms
     //console.time('getAllVaultLinks()');
     const files = thisPlugin.app.vault.getMarkdownFiles();
-    let links: string[] = [];
+    const links: string[] = [];
     files.forEach((file: TFile) => {
         links.push(file.basename);
     });
     const unResLinks = Object.values(Object.fromEntries(Object.entries(thisPlugin.app.metadataCache.unresolvedLinks)));
     unResLinks.forEach((eachItem) => {
-        let theValues = Object.keys(eachItem);
+        const theValues = Object.keys(eachItem);
         if (theValues.length > 0) { links.push(...theValues) }
     });
-    let uniq: string[] = Array.from(new Set(links));
+    const uniq: string[] = Array.from(new Set(links));
     //console.timeEnd('getAllVaultLinks()');
     return uniq
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars, @typescript-eslint/no-explicit-any
 function getVariableType(value: any): 'string' | 'number' | 'boolean' | 'object' | 'array' | 'unknown' | 'null' | 'undefined' | 'function' {
     if (typeof value === 'undefined') {
         return 'undefined';

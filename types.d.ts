@@ -4,6 +4,18 @@ declare module 'obsidian' {
     interface WorkspaceLeaf {
         containerEl: HTMLElement;
     }
+    interface App {
+        plugins: {
+            getPlugin(id: string): Plugin | null;
+        }
+    }
+    interface Plugin {
+        settings: PluginSettingsObject;
+    }
+}
+
+interface PluginSettingsObject {
+    [settingName: string]: string | number | boolean;
 }
 
 interface PatchedCachedMetadata extends CachedMetadata {
@@ -24,7 +36,7 @@ interface RelatedYamlLinks {
     yamlKeyValues: YamlKeyValMap | null;
 }
 
-interface MyPluginSettings {
+interface MyPluginSettings extends PluginSettingsObject {
     autoSpace: boolean;
     secondaryTrigger: string;
     getAlias: boolean;
