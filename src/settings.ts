@@ -74,6 +74,7 @@ export class MySettingsTab extends PluginSettingTab {
         );
         newSetting.addText((text) => {
             text.setPlaceholder(';');
+            text.inputEl.maxLength = 1;
             text.setValue(this.plugin.settings.saved.settingsConfig.secondaryTrigger);
             text.onChange(async (value) => {
                 this.plugin.settings.saved.settingsConfig.secondaryTrigger = value;
@@ -81,7 +82,6 @@ export class MySettingsTab extends PluginSettingTab {
                 await this.plugin.saveSettings();
             })
         });
-        newSetting.controlEl.querySelector('input').maxLength = 1;
 
         containerEl.createEl('h3', { text: 'User Preferences' });
         // Toggle 1

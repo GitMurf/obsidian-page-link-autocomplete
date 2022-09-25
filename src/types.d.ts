@@ -1,4 +1,4 @@
-import { CachedMetadata, FrontMatterCache, LinkCache, Pos, TFile } from "obsidian";
+import { CachedMetadata, FrontMatterCache, LinkCache, Plugin_2, Pos, TFile } from "obsidian";
 
 declare module 'obsidian' {
     interface WorkspaceLeaf {
@@ -11,6 +11,13 @@ declare module 'obsidian' {
     }
     interface Plugin {
         settings: PluginSettingsObject;
+    }
+}
+
+interface NldPlugin extends Plugin_2 {
+    settings: {
+        isAutosuggestEnabled: boolean;
+        autocompleteTriggerPhrase: string;
     }
 }
 
@@ -48,9 +55,9 @@ interface SettingsConfigTemp {
 interface SettingsDataTemp {
     curMdCacheLinks: LinkCache[];
     fileLinks: string[];
-    curYaml: FrontMatterCache;
+    curYaml: FrontMatterCache | null;
     yamlLinks: string[];
-    yamlKVPairs: YamlKeyValMap;
+    yamlKVPairs: YamlKeyValMap | null;
     vaultLinks: string[];
     linkMode: string;
     linkMatches: number;
