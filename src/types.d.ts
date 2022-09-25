@@ -1,4 +1,4 @@
-import { CachedMetadata, Pos, TFile } from "obsidian";
+import { CachedMetadata, FrontMatterCache, LinkCache, Pos, TFile } from "obsidian";
 
 declare module 'obsidian' {
     interface WorkspaceLeaf {
@@ -15,7 +15,49 @@ declare module 'obsidian' {
 }
 
 interface PluginSettingsObject {
-    [settingName: string]: string | number | boolean;
+    [settingName: string]: string | number | boolean | object;
+}
+
+interface MyPluginSettings extends PluginSettingsObject {
+    saved: {
+        settingsConfig: SettingsConfigSaved;
+        data: SettingsDataSaved;
+    };
+    temp: {
+        settingsConfig: SettingsConfigTemp;
+        data: SettingsDataTemp;
+    };
+}
+
+interface SettingsConfigSaved {
+    autoSpace: boolean;
+    secondaryTrigger: string;
+    getAlias: boolean;
+}
+
+interface SettingsDataSaved {
+    [property: string]: unknown;
+}
+
+interface SettingsConfigTemp {
+    triggerChar: string;
+    triggerCharSecondary: string;
+    triggerCharAllLinks: string;
+    useEventListener: boolean;
+    shiftSpace: boolean;
+    modRoot: HTMLDivElement;
+}
+
+interface SettingsDataTemp {
+    curMdCacheLinks: LinkCache[];
+    fileLinks: string[];
+    curYaml: FrontMatterCache;
+    yamlLinks: string[];
+    yamlKVPairs: YamlKeyValMap;
+    vaultLinks: string[];
+    linkMode: string;
+    linkMatches: number;
+    trigCharMatch: string;
 }
 
 interface PatchedCachedMetadata extends CachedMetadata {
@@ -34,12 +76,6 @@ type YamlKeyValMap = {
 interface RelatedYamlLinks {
     links: string[];
     yamlKeyValues: YamlKeyValMap | null;
-}
-
-interface MyPluginSettings extends PluginSettingsObject {
-    autoSpace: boolean;
-    secondaryTrigger: string;
-    getAlias: boolean;
 }
 
 interface YamlFiles {

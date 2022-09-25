@@ -1,51 +1,36 @@
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-import { App, Editor, Plugin, PluginSettingTab, Setting, EditorSuggest, EditorPosition, TFile, EditorSuggestTriggerInfo, EditorSuggestContext, LinkCache, prepareQuery, prepareFuzzySearch, FrontMatterCache } from 'obsidian';
-import { MyPluginSettings, PatchedCachedMetadata, PatchedFrontMatterCache, PatchedFrontMatterValues, RelatedYamlLinks, YamlFiles, YamlKeyValMap } from './types';
+import { App, Editor, Plugin, EditorSuggest, EditorPosition, TFile, EditorSuggestTriggerInfo, EditorSuggestContext, LinkCache, prepareQuery, prepareFuzzySearch, FrontMatterCache } from 'obsidian';
+import { DEFAULT_SETTINGS, MySettingsTab } from './settings';
+import { MyPluginSettings, PatchedCachedMetadata, PatchedFrontMatterCache, PatchedFrontMatterValues, RelatedYamlLinks, SettingsConfigSaved, SettingsConfigTemp, SettingsDataSaved, SettingsDataTemp, YamlFiles, YamlKeyValMap } from './types';
 
 const pluginName = 'Page Link Autocomplete';
 
-const DEFAULT_SETTINGS: MyPluginSettings = {
-    autoSpace: false,
-    secondaryTrigger: ';',
-    getAlias: true
-}
-
 export default class MyPlugin extends Plugin {
     settings: MyPluginSettings;
-    triggerChar = ' ';
-    triggerCharSecondary = ';';
-    triggerCharAllLinks = ',';
-    useEventListener = false;
-    shiftSpace = false;
-    modRoot: HTMLDivElement = null;
-    curMdCacheLinks: LinkCache[];
-    fileLinks: string[];
-    curYaml: FrontMatterCache;
-    yamlLinks: string[];
-    yamlKVPairs: YamlKeyValMap;
-    vaultLinks: string[];
-    linkMode: string;
-    linkMatches: number;
-    trigCharMatch: string;
 
     async onload() {
         console.log("loading plugin: " + pluginName);
         await this.loadSettings();
+        // These two constants are used to make the code more readable and to avoid writing full path each time
+        const tempSettingsConfig = this.settings.temp.settingsConfig;
+        const savedSettingsConfig = this.settings.saved.settingsConfig;
 
-        if (this.settings.autoSpace) {
-            this.triggerChar = ' ';
+        if (savedSettingsConfig.autoSpace) {
+            tempSettingsConfig.triggerChar = ' '; // Triggers suggester after each word (spacebar)
         } else {
-            this.triggerChar = '!null!';
+            tempSettingsConfig.triggerChar = '!null!';
         }
-        this.triggerCharSecondary = this.settings.secondaryTrigger;
+        tempSettingsConfig.triggerCharSecondary = savedSettingsConfig.secondaryTrigger;
 
+        // TODO remove this code in a separate commit
         //Use event listener like Shift + Space since EditorSuggest can't look at modifier key
         //instead of just regular EditorSuggest looking at last entered character(s)
-        this.useEventListener = false;
-        this.registerEditorSuggest(new PageLinkAutocompleteSuggester(this.app, this));
+        this.settings.temp.settingsConfig.useEventListener = false;
+
+        this.registerEditorSuggest(new PageLinkAutocompleteSuggester(this));
 
         // This adds a settings tab so the user can configure various aspects of the plugin
-        this.addSettingTab(new SampleSettingTab(this.app, this));
+        this.addSettingTab(new MySettingsTab(this));
 
         //When Obsidian initially fully loads
         this.app.workspace.onLayoutReady(this.onLayoutReady.bind(this));
@@ -68,7 +53,7 @@ export default class MyPlugin extends Plugin {
                         if (mdCache.links) {
                             //Ignoring the check for now because it only takes .1 ms to run so may as well run each time md cache updates
                             //console.time('onMetaChange - AllLinks');
-                            this.fileLinks = getLinksFromFile(this, file, mdCache.links);
+                            this.settings.temp.data.fileLinks = getLinksFromFile(this, file, mdCache.links);
                             //console.timeEnd('onMetaChange - AllLinks');
 
                             //Here is the old code when I was checking to have run less often (unnecessary though)
@@ -79,12 +64,12 @@ export default class MyPlugin extends Plugin {
                             */
                         }
                         if (mdCache.frontmatter) {
-                            if (JSON.stringify(this.curYaml) !== JSON.stringify(mdCache.frontmatter)) {
+                            if (JSON.stringify(this.settings.temp.data.curYaml) !== JSON.stringify(mdCache.frontmatter)) {
                                 console.time('onMetaChange - frontmatter');
                                 console.log(mdCache.frontmatter);
                                 const theseResults = findLinksRelatedYamlKeyValue(this, file, mdCache.frontmatter);
-                                this.yamlLinks = theseResults.links;
-                                this.yamlKVPairs = theseResults.yamlKeyValues;
+                                this.settings.temp.data.yamlLinks = theseResults.links;
+                                this.settings.temp.data.yamlKVPairs = theseResults.yamlKeyValues;
                                 // console.log('yamlLinks: ', this.yamlLinks);
                                 // console.log('yamlKVPairs', this.yamlKVPairs);
                                 console.timeEnd('onMetaChange - frontmatter');
@@ -100,13 +85,13 @@ export default class MyPlugin extends Plugin {
     onLayoutReady(): void {
         //console.log('onLayoutReady()');
         //console.time('onLayoutReady');
-        if (this.useEventListener) {
+        if (this.settings.temp.settingsConfig.useEventListener) {
             if (document.querySelector("body")) {
-                if (this.modRoot === null) { setupEventListeners(this); }
+                if (this.settings.temp.settingsConfig.modRoot === null) { setupEventListeners(this); }
             } else {
                 setTimeout(() => {
                     if (document.querySelector("body")) {
-                        if (this.modRoot === null) { setupEventListeners(this); }
+                        if (this.settings.temp.settingsConfig.modRoot === null) { setupEventListeners(this); }
                     }
                 }, 5000);
             }
@@ -114,32 +99,32 @@ export default class MyPlugin extends Plugin {
         const actFile = this.app.workspace.getActiveFile();
         if (actFile) {
             const mdCache = this.app.metadataCache.getFileCache(actFile);
-            this.fileLinks = getLinksFromFile(this, actFile, mdCache.links);
+            this.settings.temp.data.fileLinks = getLinksFromFile(this, actFile, mdCache.links);
             const theseResults = findLinksRelatedYamlKeyValue(this, actFile, mdCache.frontmatter);
-            this.yamlLinks = theseResults.links;
-            this.yamlKVPairs = theseResults.yamlKeyValues;
-            this.vaultLinks = getAllVaultLinks(this);
+            this.settings.temp.data.yamlLinks = theseResults.links;
+            this.settings.temp.data.yamlKVPairs = theseResults.yamlKeyValues;
+            this.settings.temp.data.vaultLinks = getAllVaultLinks(this);
         }
         //console.timeEnd('onLayoutReady');
     }
 
     async onFileChange() {
-        this.fileLinks = [];
-        this.yamlLinks = [];
-        this.yamlKVPairs = {};
-        this.vaultLinks = [];
+        this.settings.temp.data.fileLinks = [];
+        this.settings.temp.data.yamlLinks = [];
+        this.settings.temp.data.yamlKVPairs = {};
+        this.settings.temp.data.vaultLinks = [];
         //console.log('onFileChange()');
         //console.time('onFileChange');
         if (this.app.workspace.layoutReady) {
             const actFile = this.app.workspace.getActiveFile();
             if (actFile) {
                 const mdCache = this.app.metadataCache.getFileCache(actFile);
-                this.fileLinks = getLinksFromFile(this, actFile, mdCache.links);
+                this.settings.temp.data.fileLinks = getLinksFromFile(this, actFile, mdCache.links);
                 const theseResults = findLinksRelatedYamlKeyValue(this, actFile, mdCache.frontmatter);
                 console.log("theseResults", theseResults);
-                this.yamlLinks = theseResults.links;
-                this.yamlKVPairs = theseResults.yamlKeyValues;
-                this.vaultLinks = getAllVaultLinks(this);
+                this.settings.temp.data.yamlLinks = theseResults.links;
+                this.settings.temp.data.yamlKVPairs = theseResults.yamlKeyValues;
+                this.settings.temp.data.vaultLinks = getAllVaultLinks(this);
             }
         }
         //console.timeEnd('onFileChange');
@@ -150,87 +135,53 @@ export default class MyPlugin extends Plugin {
     }
 
     async loadSettings() {
-        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+        // This is a little different than most plugins, but it is a good way to split up temporary and persistent saved settings and data
+        // Need to load first the default TEMP settings that are NOT saved to the data.json file
+        this.settings = Object.assign({}, DEFAULT_SETTINGS);
+        // Then load the saved settings from the data.json file
+        this.settings.saved = Object.assign(this.settings.saved, await this.loadData());
     }
 
     async saveSettings() {
-        await this.saveData(this.settings);
+        await this.saveData(this.settings.saved);
     }
 }
 
 function setupEventListeners(thisPlugin: MyPlugin) {
     //console.log('setupEventListeners');
     //Find the main DIV that holds all the markdown panes
-    thisPlugin.modRoot = document.querySelector('.workspace-split.mod-vertical.mod-root') as HTMLDivElement;
-    thisPlugin.registerDomEvent(thisPlugin.modRoot, 'keydown', (evt: KeyboardEvent) => {
+    thisPlugin.settings.temp.settingsConfig.modRoot = document.querySelector('.workspace-split.mod-vertical.mod-root') as HTMLDivElement;
+    thisPlugin.registerDomEvent(thisPlugin.settings.temp.settingsConfig.modRoot, 'keydown', (evt: KeyboardEvent) => {
         if (evt.shiftKey && evt.key === ' ') {
-            thisPlugin.shiftSpace = true;
+            thisPlugin.settings.temp.settingsConfig.shiftSpace = true;
             //console.log('shift + space');
-        } else if (thisPlugin.shiftSpace === true) {
-            thisPlugin.shiftSpace = false;
+        } else if (thisPlugin.settings.temp.settingsConfig.shiftSpace === true) {
+            thisPlugin.settings.temp.settingsConfig.shiftSpace = false;
             //console.log('setting to false');
         }
     })
 }
 
-class SampleSettingTab extends PluginSettingTab {
-    plugin: MyPlugin;
-
-    constructor(app: App, plugin: MyPlugin) {
-        super(app, plugin);
-        this.plugin = plugin;
-    }
-
-    display(): void {
-        const { containerEl } = this;
-        containerEl.empty();
-        containerEl.createEl('h2', { text: 'Page Link Autocomplete Settings' });
-
-        new Setting(containerEl)
-            .setName('Auto Suggest Links with Spacebar')
-            .setDesc('When enabled this plugin will suggest links after each word you type (if there is a match)')
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.autoSpace)
-                .onChange(async (value) => {
-                    this.plugin.settings.autoSpace = value;
-                    if (value === true) {
-                        this.plugin.triggerChar = ' ';
-                    } else {
-                        this.plugin.triggerChar = '!null!';
-                    }
-                    await this.plugin.saveSettings();
-                }));
-
-        const thisElem = new Setting(containerEl)
-            .setName('Secondary Suggest Trigger')
-            .setDesc(createFragment((innerFrag) => {
-                innerFrag.createEl('span', { text: 'Character that manually triggers the suggester' });
-                innerFrag.createEl('br');
-                innerFrag.createEl('strong', { text: 'Note:' });
-                innerFrag.createEl('span', { text: ' This can be used in addition to (or in place of) the Spacebar option above' });
-            }))
-            .addText(text => text
-                .setPlaceholder(';')
-                .setValue(this.plugin.settings.secondaryTrigger)
-                .onChange(async (value) => {
-                    this.plugin.settings.secondaryTrigger = value;
-                    this.plugin.triggerCharSecondary = value;
-                    await this.plugin.saveSettings();
-                }));
-        thisElem.controlEl.querySelector('input').maxLength = 1;
-    }
-}
-
 class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
+    pluginSettingsSavedConfig: SettingsConfigSaved;
+    pluginSettingsSavedData: SettingsDataSaved;
+    pluginSettingsTempConfig: SettingsConfigTemp;
+    pluginSettingsTempData: SettingsDataTemp;
 
-    constructor(app: App, private thisPlugin: MyPlugin) {
-        super(app);
+    constructor(private thisPlugin: MyPlugin) {
+        super(thisPlugin.app);
+        // this.limit = 10;
+        // Used to make the code more readable and to avoid writing full path each time
+        this.pluginSettingsSavedConfig = this.thisPlugin.settings.saved.settingsConfig;
+        this.pluginSettingsSavedData = this.thisPlugin.settings.saved.data;
+        this.pluginSettingsTempConfig = this.thisPlugin.settings.temp.settingsConfig;
+        this.pluginSettingsTempData = this.thisPlugin.settings.temp.data;
     }
 
     close() {
-        this.thisPlugin.trigCharMatch = "";
-        this.thisPlugin.linkMode = 'yaml';
-        this.thisPlugin.linkMatches = 0;
+        this.pluginSettingsTempData.trigCharMatch = "";
+        this.pluginSettingsTempData.linkMode = 'yaml';
+        this.pluginSettingsTempData.linkMatches = 0;
         // call Obsidian's close method from the class you're extending to close it
         super.close();
     }
@@ -239,7 +190,7 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
         if (cursor.ch === 0) {
             // at beginning of line so exit
             //console.log('beg of line. Enter key may have been pressed.');
-            this.thisPlugin.linkMatches = 0;
+            this.pluginSettingsTempData.linkMatches = 0;
             return null;
         } else {
             const cursorChar1 = editor.getRange({ line: cursor.line, ch: cursor.ch - 2 }, cursor);
@@ -249,28 +200,28 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
                 const curLineStr1 = editor.getLine(cursor.line);
                 const curLineStrMatch1 = curLineStr1.substring(0, cursor.ch);
                 const curLineProp = curLineStr1.substring(0, cursor.ch - 2);
-                this.thisPlugin.linkMode = 'yaml-complete';
+                this.pluginSettingsTempData.linkMode = 'yaml-complete';
                 let foundValues: PatchedFrontMatterValues[];
                 // TODO - make case insensitive so keys can be in any case
-                if (this.thisPlugin.yamlKVPairs) {
-                    foundValues = this.thisPlugin.yamlKVPairs[curLineProp];
+                if (this.pluginSettingsTempData.yamlKVPairs) {
+                    foundValues = this.pluginSettingsTempData.yamlKVPairs[curLineProp];
                 }
                 //console.log(foundValues);
                 if (foundValues) {
-                    this.thisPlugin.yamlLinks = foundValues.map(val => val.toString());
-                    //console.log(this.thisPlugin.yamlLinks);
+                    this.pluginSettingsTempData.yamlLinks = foundValues.map(val => val.toString());
+                    //console.log(this.pluginSettingsTempData.yamlLinks);
                     return {
                         start: { line: cursor.line, ch: curLineStrMatch1.length },
                         end: { line: cursor.line, ch: curLineStrMatch1.length },
                         query: "test"
                     };
                 } else {
-                    this.thisPlugin.linkMatches = 0;
+                    this.pluginSettingsTempData.linkMatches = 0;
                     return null;
                 }
             } else {
                 //If this.context has a value that means the page autocomplete suggester is currently open
-                if (this.context && this.thisPlugin.linkMatches > 0) {
+                if (this.context && this.pluginSettingsTempData.linkMatches > 0) {
                     //This allows the user to filter down the list even more when typing further instead of making it disappear
                     //console.log(this.context);
 
@@ -279,36 +230,36 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
                     const lastChar = origLineStr.substring(cursor.ch - 1, cursor.ch);
 
                     let myOffset = 0;
-                    if (this.thisPlugin.trigCharMatch === this.thisPlugin.triggerCharSecondary && lastChar === this.thisPlugin.triggerCharAllLinks) {
-                        this.thisPlugin.trigCharMatch = `${this.thisPlugin.triggerCharSecondary}${this.thisPlugin.triggerCharAllLinks}`;
-                        this.thisPlugin.linkMode = 'all-semi';
+                    if (this.pluginSettingsTempData.trigCharMatch === this.pluginSettingsTempConfig.triggerCharSecondary && lastChar === this.pluginSettingsTempConfig.triggerCharAllLinks) {
+                        this.pluginSettingsTempData.trigCharMatch = `${this.pluginSettingsTempConfig.triggerCharSecondary}${this.pluginSettingsTempConfig.triggerCharAllLinks}`;
+                        this.pluginSettingsTempData.linkMode = 'all-semi';
                         myOffset = 1;
                     }
-                    if (this.thisPlugin.trigCharMatch === this.thisPlugin.triggerChar && lastChar === this.thisPlugin.triggerCharAllLinks) {
-                        this.thisPlugin.trigCharMatch = `${this.thisPlugin.triggerChar}${this.thisPlugin.triggerCharAllLinks}`;
-                        this.thisPlugin.linkMode = 'all';
+                    if (this.pluginSettingsTempData.trigCharMatch === this.pluginSettingsTempConfig.triggerChar && lastChar === this.pluginSettingsTempConfig.triggerCharAllLinks) {
+                        this.pluginSettingsTempData.trigCharMatch = `${this.pluginSettingsTempConfig.triggerChar}${this.pluginSettingsTempConfig.triggerCharAllLinks}`;
+                        this.pluginSettingsTempData.linkMode = 'all';
                         myOffset = 1;
                     }
                     let startRange: EditorPosition;
                     let endRange: EditorPosition;
-                    switch (this.thisPlugin.trigCharMatch) {
-                        case this.thisPlugin.triggerCharSecondary:
+                    switch (this.pluginSettingsTempData.trigCharMatch) {
+                        case this.pluginSettingsTempConfig.triggerCharSecondary:
                             //Don't need to do anything special here
                             break;
-                        case `${this.thisPlugin.triggerCharSecondary}${this.thisPlugin.triggerCharAllLinks}`:
+                        case `${this.pluginSettingsTempConfig.triggerCharSecondary}${this.pluginSettingsTempConfig.triggerCharAllLinks}`:
                             startRange = { line: cursor.line, ch: cursor.ch - 3 + myOffset };
                             endRange = { line: cursor.line, ch: cursor.ch - 1 + myOffset };
-                            if (editor.getRange(startRange, endRange) === `${this.thisPlugin.triggerCharSecondary}${this.thisPlugin.triggerCharAllLinks}`) {
+                            if (editor.getRange(startRange, endRange) === `${this.pluginSettingsTempConfig.triggerCharSecondary}${this.pluginSettingsTempConfig.triggerCharAllLinks}`) {
                                 editor.replaceRange('', startRange, endRange)
                             }
                             break;
-                        case `${this.thisPlugin.triggerChar}`:
+                        case `${this.pluginSettingsTempConfig.triggerChar}`:
                             //Don't need to do anything special here
                             break;
-                        case `${this.thisPlugin.triggerChar}${this.thisPlugin.triggerCharAllLinks}`:
+                        case `${this.pluginSettingsTempConfig.triggerChar}${this.pluginSettingsTempConfig.triggerCharAllLinks}`:
                             startRange = { line: cursor.line, ch: cursor.ch - 2 + myOffset };
                             endRange = { line: cursor.line, ch: cursor.ch - 1 + myOffset };
-                            if (editor.getRange(startRange, endRange) === this.thisPlugin.triggerCharAllLinks) {
+                            if (editor.getRange(startRange, endRange) === this.pluginSettingsTempConfig.triggerCharAllLinks) {
                                 editor.replaceRange('', startRange, endRange)
                             }
                             break;
@@ -319,7 +270,7 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
                     const curLineStr = editor.getLine(curCursor.line);
                     const newQuery = curLineStr.substring(this.context.start.ch, curCursor.ch);
                     if (newQuery.length < 4) {
-                        this.thisPlugin.linkMatches = 0;
+                        this.pluginSettingsTempData.linkMatches = 0;
                         return null
                     }
                     return {
@@ -329,8 +280,8 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
                     };
                 } else {
                     const cursorChar = editor.getRange({ line: cursor.line, ch: cursor.ch - 1 }, cursor)
-                    if (cursorChar !== this.thisPlugin.triggerChar && cursorChar !== this.thisPlugin.triggerCharSecondary && cursorChar !== this.thisPlugin.triggerCharAllLinks) {
-                        this.thisPlugin.linkMatches = 0;
+                    if (cursorChar !== this.pluginSettingsTempConfig.triggerChar && cursorChar !== this.pluginSettingsTempConfig.triggerCharSecondary && cursorChar !== this.pluginSettingsTempConfig.triggerCharAllLinks) {
+                        this.pluginSettingsTempData.linkMatches = 0;
                         return null;
                     }
 
@@ -345,13 +296,13 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
                         nldTrigger = nld.settings.autocompleteTriggerPhrase as string;
                     }
 
-                    this.thisPlugin.linkMode = 'yaml';
-                    this.thisPlugin.linkMatches = 0;
+                    this.pluginSettingsTempData.linkMode = 'yaml';
+                    this.pluginSettingsTempData.linkMatches = 0;
                     const curLineStr = editor.getLine(cursor.line);
                     if (nldActive && nldSuggest) {
                         //This is to avoid interfering with the natural language dates plugin trigger which I am using ",," for
                         if (curLineStr.indexOf(nldTrigger) > -1) {
-                            this.thisPlugin.linkMatches = 0;
+                            this.pluginSettingsTempData.linkMatches = 0;
                             return null;
                         }
                     }
@@ -361,21 +312,21 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
                     let semiAll = false;
                     let spaceAll = false;
                     let continueProcessing = false;
-                    if (this.thisPlugin.useEventListener) {
-                        if (this.thisPlugin.shiftSpace !== false) { continueProcessing = true }
+                    if (this.pluginSettingsTempConfig.useEventListener) {
+                        if (this.pluginSettingsTempConfig.shiftSpace !== false) { continueProcessing = true }
                     } else {
-                        if (cursorTwoChar === `${this.thisPlugin.triggerCharSecondary}${this.thisPlugin.triggerCharAllLinks}`) { semiAll = true }
-                        if (cursorTwoChar === `${this.thisPlugin.triggerChar}${this.thisPlugin.triggerCharAllLinks}`) { spaceAll = true }
-                        if (cursorChar === this.thisPlugin.triggerChar || cursorChar === this.thisPlugin.triggerCharSecondary || semiAll || spaceAll) { continueProcessing = true }
+                        if (cursorTwoChar === `${this.pluginSettingsTempConfig.triggerCharSecondary}${this.pluginSettingsTempConfig.triggerCharAllLinks}`) { semiAll = true }
+                        if (cursorTwoChar === `${this.pluginSettingsTempConfig.triggerChar}${this.pluginSettingsTempConfig.triggerCharAllLinks}`) { spaceAll = true }
+                        if (cursorChar === this.pluginSettingsTempConfig.triggerChar || cursorChar === this.pluginSettingsTempConfig.triggerCharSecondary || semiAll || spaceAll) { continueProcessing = true }
                     }
 
                     if (continueProcessing === false) {
-                        this.thisPlugin.linkMatches = 0;
+                        this.pluginSettingsTempData.linkMatches = 0;
                         return null;
                     } else {
                         let lastWord;
                         let charsBack = 1;
-                        if (cursorTwoChar === `${this.thisPlugin.triggerCharSecondary}${this.thisPlugin.triggerCharSecondary}` || cursorTwoChar === `${this.thisPlugin.triggerChar}${this.thisPlugin.triggerChar}` || semiAll || spaceAll) {
+                        if (cursorTwoChar === `${this.pluginSettingsTempConfig.triggerCharSecondary}${this.pluginSettingsTempConfig.triggerCharSecondary}` || cursorTwoChar === `${this.pluginSettingsTempConfig.triggerChar}${this.pluginSettingsTempConfig.triggerChar}` || semiAll || spaceAll) {
                             charsBack = 2;
                             const splitWords = curLineStrMatch.substring(0, curLineStrMatch.length - 2).split(' ');
                             if (semiAll || spaceAll) {
@@ -393,16 +344,16 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
                         }
 
                         if (lastWord.trim() === "") {
-                            this.thisPlugin.linkMatches = 0;
+                            this.pluginSettingsTempData.linkMatches = 0;
                             return null;
                         }
-                        if (cursorChar === this.thisPlugin.triggerChar || cursorChar === this.thisPlugin.triggerCharAllLinks) {
+                        if (cursorChar === this.pluginSettingsTempConfig.triggerChar || cursorChar === this.pluginSettingsTempConfig.triggerCharAllLinks) {
                             if (lastWord.length <= 2) {
-                                this.thisPlugin.linkMatches = 0;
+                                this.pluginSettingsTempData.linkMatches = 0;
                                 return null;
                             }
                             if (lastWord.length === 3 && lastWord !== lastWord.toUpperCase()) {
-                                this.thisPlugin.linkMatches = 0;
+                                this.pluginSettingsTempData.linkMatches = 0;
                                 return null;
                             } //For capitalized acronyms
                         }
@@ -414,31 +365,31 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
                         console.log(prepFuzzySearch);
                         */
 
-                        if (cursorChar === this.thisPlugin.triggerCharSecondary) {
-                            this.thisPlugin.trigCharMatch = this.thisPlugin.triggerCharSecondary;
+                        if (cursorChar === this.pluginSettingsTempConfig.triggerCharSecondary) {
+                            this.pluginSettingsTempData.trigCharMatch = this.pluginSettingsTempConfig.triggerCharSecondary;
                             return {
                                 start: { line: cursor.line, ch: curLineStrMatch.length - charsBack - lastWord.length },
                                 end: { line: cursor.line, ch: curLineStrMatch.length },
                                 query: lastWord
                             };
                         } else if (semiAll) {
-                            this.thisPlugin.linkMode = 'all-semi';
-                            this.thisPlugin.trigCharMatch = `${this.thisPlugin.triggerCharSecondary}${this.thisPlugin.triggerCharAllLinks}`;
+                            this.pluginSettingsTempData.linkMode = 'all-semi';
+                            this.pluginSettingsTempData.trigCharMatch = `${this.pluginSettingsTempConfig.triggerCharSecondary}${this.pluginSettingsTempConfig.triggerCharAllLinks}`;
                             return {
                                 start: { line: cursor.line, ch: curLineStrMatch.length - charsBack - lastWord.length },
                                 end: { line: cursor.line, ch: curLineStrMatch.length },
                                 query: lastWord
                             };
                         } else if (spaceAll) {
-                            this.thisPlugin.linkMode = 'all';
-                            this.thisPlugin.trigCharMatch = `${this.thisPlugin.triggerChar}${this.thisPlugin.triggerCharAllLinks}`;
+                            this.pluginSettingsTempData.linkMode = 'all';
+                            this.pluginSettingsTempData.trigCharMatch = `${this.pluginSettingsTempConfig.triggerChar}${this.pluginSettingsTempConfig.triggerCharAllLinks}`;
                             return {
                                 start: { line: cursor.line, ch: curLineStrMatch.length - charsBack - lastWord.length },
                                 end: { line: cursor.line, ch: curLineStrMatch.length },
                                 query: lastWord
                             };
                         } else {
-                            this.thisPlugin.trigCharMatch = `${this.thisPlugin.triggerChar}`;
+                            this.pluginSettingsTempData.trigCharMatch = `${this.pluginSettingsTempConfig.triggerChar}`;
                             return {
                                 start: { line: cursor.line, ch: curLineStrMatch.length - charsBack - lastWord.length },
                                 end: { line: cursor.line, ch: curLineStrMatch.length },
@@ -459,37 +410,37 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
         console.log(queryText);
         */
         /*
-        console.log(this.thisPlugin.fileLinks)
-        console.log(this.thisPlugin.yamlLinks)
-        console.log(this.thisPlugin.vaultLinks)
+        console.log(this.pluginSettingsTempData.fileLinks)
+        console.log(this.pluginSettingsTempData.yamlLinks)
+        console.log(this.pluginSettingsTempData.vaultLinks)
         */
         let allLinks: string[] = [];
-        switch (this.thisPlugin.linkMode) {
+        switch (this.pluginSettingsTempData.linkMode) {
             case 'yaml':
-                allLinks.push(...this.thisPlugin.fileLinks.sort(function (a, b) { return a.length - b.length }));
-                allLinks.push(...this.thisPlugin.yamlLinks.sort(function (a, b) { return a.length - b.length }));
+                allLinks.push(...this.pluginSettingsTempData.fileLinks.sort(function (a, b) { return a.length - b.length }));
+                allLinks.push(...this.pluginSettingsTempData.yamlLinks.sort(function (a, b) { return a.length - b.length }));
                 break;
             case 'all':
-                allLinks.push(...this.thisPlugin.fileLinks.sort(function (a, b) { return a.length - b.length }));
-                allLinks.push(...this.thisPlugin.yamlLinks.sort(function (a, b) { return a.length - b.length }));
-                allLinks.push(...this.thisPlugin.vaultLinks.sort(function (a, b) { return a.length - b.length }));
+                allLinks.push(...this.pluginSettingsTempData.fileLinks.sort(function (a, b) { return a.length - b.length }));
+                allLinks.push(...this.pluginSettingsTempData.yamlLinks.sort(function (a, b) { return a.length - b.length }));
+                allLinks.push(...this.pluginSettingsTempData.vaultLinks.sort(function (a, b) { return a.length - b.length }));
                 break;
             case 'all-semi':
-                allLinks.push(...this.thisPlugin.fileLinks.sort(function (a, b) { return a.length - b.length }));
-                allLinks.push(...this.thisPlugin.yamlLinks.sort(function (a, b) { return a.length - b.length }));
-                allLinks.push(...this.thisPlugin.vaultLinks.sort(function (a, b) { return a.length - b.length }));
+                allLinks.push(...this.pluginSettingsTempData.fileLinks.sort(function (a, b) { return a.length - b.length }));
+                allLinks.push(...this.pluginSettingsTempData.yamlLinks.sort(function (a, b) { return a.length - b.length }));
+                allLinks.push(...this.pluginSettingsTempData.vaultLinks.sort(function (a, b) { return a.length - b.length }));
                 break;
             case 'yaml-complete':
-                allLinks.push(...this.thisPlugin.yamlLinks.sort(function (a, b) { return a.length - b.length }));
+                allLinks.push(...this.pluginSettingsTempData.yamlLinks.sort(function (a, b) { return a.length - b.length }));
                 break;
             default:
-                allLinks.push(...this.thisPlugin.fileLinks.sort(function (a, b) { return a.length - b.length }));
+                allLinks.push(...this.pluginSettingsTempData.fileLinks.sort(function (a, b) { return a.length - b.length }));
         }
         // get unique values of allLinks
         allLinks = [...new Set(allLinks)];
-        console.log('linkMode:', this.thisPlugin.linkMode, 'allLinks:', allLinks);
+        console.log('linkMode:', this.pluginSettingsTempData.linkMode, 'allLinks:', allLinks);
         let matchingItems: string[] = [];
-        if (this.thisPlugin.linkMode === 'yaml-complete') { // TODO: continue filtering as I type more YAML value characters
+        if (this.pluginSettingsTempData.linkMode === 'yaml-complete') { // TODO: continue filtering as I type more YAML value characters
             matchingItems = allLinks;
         } else {
             matchingItems = allLinks.filter(eachLink => {
@@ -503,10 +454,10 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
         }
         const finalItems: string[] = Array.from(new Set(matchingItems));
         if (finalItems.length > 0) {
-            this.thisPlugin.linkMatches = finalItems.length;
+            this.pluginSettingsTempData.linkMatches = finalItems.length;
             return finalItems
         } else {
-            this.thisPlugin.linkMatches = 0;
+            this.pluginSettingsTempData.linkMatches = 0;
             return null
         }
     }
@@ -519,7 +470,7 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
     selectSuggestion(value: string, event: MouseEvent | KeyboardEvent) {
         const editor = this.context.editor;
         let newLink = `[[${value}]]`;
-        if (this.thisPlugin.triggerChar === ' ' && (this.thisPlugin.trigCharMatch === `${this.thisPlugin.triggerChar}` || this.thisPlugin.trigCharMatch === `${this.thisPlugin.triggerChar}${this.thisPlugin.triggerCharAllLinks}`)) {
+        if (this.pluginSettingsTempConfig.triggerChar === ' ' && (this.pluginSettingsTempData.trigCharMatch === `${this.pluginSettingsTempConfig.triggerChar}` || this.pluginSettingsTempData.trigCharMatch === `${this.pluginSettingsTempConfig.triggerChar}${this.pluginSettingsTempConfig.triggerCharAllLinks}`)) {
             newLink = `[[${value}]] `;
         }
         editor.replaceRange(newLink, this.context.start, this.context.end);
@@ -545,7 +496,7 @@ function getLinksFromFile(thisPlugin: MyPlugin, myFile: TFile, allLinks: LinkCac
             }
         }
     }
-    thisPlugin.curMdCacheLinks = allLinks;
+    thisPlugin.settings.temp.data.curMdCacheLinks = allLinks;
     if (allLinks) {
         const myLinks: string[] = [];
         allLinks.forEach(eachLink => {
@@ -568,7 +519,7 @@ function getLinksFromFile(thisPlugin: MyPlugin, myFile: TFile, allLinks: LinkCac
 }
 
 function findLinksRelatedYamlKeyValue(thisPlugin: MyPlugin, myFile: TFile, mdYaml: FrontMatterCache = null): RelatedYamlLinks {
-    thisPlugin.yamlLinks = [];
+    thisPlugin.settings.temp.data.yamlLinks = [];
     const yamlKVMap: YamlKeyValMap = {};
     //console.log('findLinksRelatedYamlKeyValue');
     if (!mdYaml) {
@@ -579,7 +530,7 @@ function findLinksRelatedYamlKeyValue(thisPlugin: MyPlugin, myFile: TFile, mdYam
             }
         }
     }
-    thisPlugin.curYaml = mdYaml;
+    thisPlugin.settings.temp.data.curYaml = mdYaml;
     if (mdYaml) {
         const patchedFrontMatter: PatchedFrontMatterCache = mdYaml as PatchedFrontMatterCache;
         const allFiles = thisPlugin.app.vault.getMarkdownFiles();
