@@ -43,9 +43,6 @@ interface SettingsConfigTemp {
     triggerChar: string;
     triggerCharSecondary: string;
     triggerCharAllLinks: string;
-    useEventListener: boolean;
-    shiftSpace: boolean;
-    modRoot: HTMLDivElement;
 }
 
 interface SettingsDataTemp {

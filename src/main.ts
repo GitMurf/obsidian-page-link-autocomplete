@@ -1,5 +1,5 @@
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-import { App, Editor, Plugin, EditorSuggest, EditorPosition, TFile, EditorSuggestTriggerInfo, EditorSuggestContext, LinkCache, prepareQuery, prepareFuzzySearch, FrontMatterCache } from 'obsidian';
+import { Editor, Plugin, EditorSuggest, EditorPosition, TFile, EditorSuggestTriggerInfo, EditorSuggestContext, LinkCache, prepareQuery, prepareFuzzySearch, FrontMatterCache } from 'obsidian';
 import { DEFAULT_SETTINGS, MySettingsTab } from './settings';
 import { MyPluginSettings, PatchedCachedMetadata, PatchedFrontMatterCache, PatchedFrontMatterValues, RelatedYamlLinks, SettingsConfigSaved, SettingsConfigTemp, SettingsDataSaved, SettingsDataTemp, YamlFiles, YamlKeyValMap } from './types';
 
@@ -21,11 +21,6 @@ export default class MyPlugin extends Plugin {
             tempSettingsConfig.triggerChar = '!null!';
         }
         tempSettingsConfig.triggerCharSecondary = savedSettingsConfig.secondaryTrigger;
-
-        // TODO remove this code in a separate commit
-        //Use event listener like Shift + Space since EditorSuggest can't look at modifier key
-        //instead of just regular EditorSuggest looking at last entered character(s)
-        this.settings.temp.settingsConfig.useEventListener = false;
 
         this.registerEditorSuggest(new PageLinkAutocompleteSuggester(this));
 
@@ -85,17 +80,6 @@ export default class MyPlugin extends Plugin {
     onLayoutReady(): void {
         //console.log('onLayoutReady()');
         //console.time('onLayoutReady');
-        if (this.settings.temp.settingsConfig.useEventListener) {
-            if (document.querySelector("body")) {
-                if (this.settings.temp.settingsConfig.modRoot === null) { setupEventListeners(this); }
-            } else {
-                setTimeout(() => {
-                    if (document.querySelector("body")) {
-                        if (this.settings.temp.settingsConfig.modRoot === null) { setupEventListeners(this); }
-                    }
-                }, 5000);
-            }
-        }
         const actFile = this.app.workspace.getActiveFile();
         if (actFile) {
             const mdCache = this.app.metadataCache.getFileCache(actFile);
@@ -145,21 +129,6 @@ export default class MyPlugin extends Plugin {
     async saveSettings() {
         await this.saveData(this.settings.saved);
     }
-}
-
-function setupEventListeners(thisPlugin: MyPlugin) {
-    //console.log('setupEventListeners');
-    //Find the main DIV that holds all the markdown panes
-    thisPlugin.settings.temp.settingsConfig.modRoot = document.querySelector('.workspace-split.mod-vertical.mod-root') as HTMLDivElement;
-    thisPlugin.registerDomEvent(thisPlugin.settings.temp.settingsConfig.modRoot, 'keydown', (evt: KeyboardEvent) => {
-        if (evt.shiftKey && evt.key === ' ') {
-            thisPlugin.settings.temp.settingsConfig.shiftSpace = true;
-            //console.log('shift + space');
-        } else if (thisPlugin.settings.temp.settingsConfig.shiftSpace === true) {
-            thisPlugin.settings.temp.settingsConfig.shiftSpace = false;
-            //console.log('setting to false');
-        }
-    })
 }
 
 class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
@@ -312,13 +281,10 @@ class PageLinkAutocompleteSuggester extends EditorSuggest<string> {
                     let semiAll = false;
                     let spaceAll = false;
                     let continueProcessing = false;
-                    if (this.pluginSettingsTempConfig.useEventListener) {
-                        if (this.pluginSettingsTempConfig.shiftSpace !== false) { continueProcessing = true }
-                    } else {
-                        if (cursorTwoChar === `${this.pluginSettingsTempConfig.triggerCharSecondary}${this.pluginSettingsTempConfig.triggerCharAllLinks}`) { semiAll = true }
-                        if (cursorTwoChar === `${this.pluginSettingsTempConfig.triggerChar}${this.pluginSettingsTempConfig.triggerCharAllLinks}`) { spaceAll = true }
-                        if (cursorChar === this.pluginSettingsTempConfig.triggerChar || cursorChar === this.pluginSettingsTempConfig.triggerCharSecondary || semiAll || spaceAll) { continueProcessing = true }
-                    }
+
+                    if (cursorTwoChar === `${this.pluginSettingsTempConfig.triggerCharSecondary}${this.pluginSettingsTempConfig.triggerCharAllLinks}`) { semiAll = true }
+                    if (cursorTwoChar === `${this.pluginSettingsTempConfig.triggerChar}${this.pluginSettingsTempConfig.triggerCharAllLinks}`) { spaceAll = true }
+                    if (cursorChar === this.pluginSettingsTempConfig.triggerChar || cursorChar === this.pluginSettingsTempConfig.triggerCharSecondary || semiAll || spaceAll) { continueProcessing = true }
 
                     if (continueProcessing === false) {
                         this.pluginSettingsTempData.linkMatches = 0;

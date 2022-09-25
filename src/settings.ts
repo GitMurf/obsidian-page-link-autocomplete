@@ -16,9 +16,6 @@ export const DEFAULT_SETTINGS: MyPluginSettings = {
             triggerChar: ' ',
             triggerCharSecondary: ';',
             triggerCharAllLinks: ',',
-            useEventListener: false,
-            shiftSpace: false,
-            modRoot: null,
         },
         data: {
             curMdCacheLinks: [],
